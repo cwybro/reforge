@@ -29,7 +29,7 @@ struct Config: Codable {
 }
 
 enum Store {
-    static let dir = FileManager.default.homeDirectoryForCurrentUser
+    static let dir = DevMode.dir ?? FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Reforge", isDirectory: true)
     static let file = dir.appendingPathComponent("config.json")
     /// Where settings lived before the app was renamed from "Addon Updater".
@@ -38,7 +38,7 @@ enum Store {
 
     static func load() -> Config? {
         let fm = FileManager.default
-        if !fm.fileExists(atPath: file.path), fm.fileExists(atPath: legacyDir.appendingPathComponent("config.json").path) {
+        if DevMode.dir == nil, !fm.fileExists(atPath: file.path), fm.fileExists(atPath: legacyDir.appendingPathComponent("config.json").path) {
             try? fm.moveItem(at: legacyDir, to: dir)
         }
         guard let data = try? Data(contentsOf: file) else { return nil }

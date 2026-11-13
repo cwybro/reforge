@@ -52,7 +52,7 @@ Reforge uses the official [CurseForge API](https://docs.curseforge.com/), which 
 
 Reforge only talks to CurseForge's API and download servers. The repository itself contains no credentials.
 
-Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Reforge can use its Keychain item. Click **Always Allow**.
+Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Reforge can use its Keychain item. Click **Always Allow**. While hacking on the app, use `make dev` instead to skip the Keychain entirely.
 
 ## 🛠 Development
 
@@ -61,6 +61,7 @@ Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Ref
 | `make install` | Build and install to `/Applications` (quits the running copy first) |
 | `make run` | Install, then open the app |
 | `make build` | Build `Reforge.app` in the project folder |
+| `make dev` | Build and open a dev copy that keeps its settings and API key in `./.dev` (git-ignored) instead of Application Support and the Keychain, so rebuilds never trigger Keychain prompts |
 | `make icon` | Redraw the app icon |
 | `make clean` | Remove build output |
 

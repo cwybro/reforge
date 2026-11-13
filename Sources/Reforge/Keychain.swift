@@ -17,6 +17,9 @@ enum Keychain {
     }
 
     static func read() -> String {
+        if let file = DevMode.keyFile {
+            return (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
         let key = read(service: service)
         if !key.isEmpty { return key }
         // One-time move from the pre-rename Keychain item.
@@ -40,6 +43,7 @@ enum Keychain {
     /// Saves the key, or deletes the item when `key` is empty. Returns false on failure.
     @discardableResult
     static func write(_ key: String) -> Bool {
+        if let file = DevMode.keyFile { return DevMode.writeKey(key, to: file) }
         if key.isEmpty {
             let s = SecItemDelete(baseQuery as CFDictionary)
             return s == errSecSuccess || s == errSecItemNotFound

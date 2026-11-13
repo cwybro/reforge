@@ -81,6 +81,37 @@ private struct WindowConfigurator: NSViewRepresentable {
         window.toolbarStyle = .unified
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // The (empty) toolbar sits on top of our header and would swallow its clicks.
+        if let container = window.standardWindowButton(.closeButton)?.superview?.superview {
+            TitlebarPassThrough.apply(to: container)
+        }
+    }
+}
+
+/// Lets clicks in the title bar fall through to the SwiftUI header underneath, except on
+/// real controls (the close/minimise/zoom buttons). Done by giving the title bar container
+/// a tiny runtime subclass whose hitTest drops anything that isn't an NSControl.
+private enum TitlebarPassThrough {
+    static func apply(to view: NSView) {
+        guard let cls = object_getClass(view) else { return }
+        let base = NSStringFromClass(cls)
+        guard !base.hasPrefix("Reforge_") else { return }
+        let name = "Reforge_" + base
+        var sub: AnyClass? = NSClassFromString(name)
+        if sub == nil, let made = objc_allocateClassPair(cls, name, 0),
+           let method = class_getInstanceMethod(cls, #selector(NSView.hitTest(_:))) {
+            typealias HitTest = @convention(c) (NSView, Selector, NSPoint) -> NSView?
+            let sel = #selector(NSView.hitTest(_:))
+            let original = unsafeBitCast(method_getImplementation(method), to: HitTest.self)
+            let block: @convention(block) (NSView, NSPoint) -> NSView? = { view, point in
+                let hit = original(view, sel, point)
+                return hit is NSControl ? hit : nil
+            }
+            class_addMethod(made, sel, imp_implementationWithBlock(block), method_getTypeEncoding(method))
+            objc_registerClassPair(made)
+            sub = made
+        }
+        if let sub { object_setClass(view, sub) }
     }
 }
 
@@ -95,6 +126,7 @@ struct ContentView: View {
             AppBackground()
             VStack(spacing: 0) {
                 Header(model: model, showingAdd: $showingAdd)
+                    .zIndex(1)
                 if !model.hasKey {
                     KeyBanner(model: model).padding(.horizontal, 20).padding(.bottom, 12)
                 }

@@ -2,11 +2,12 @@
 APP_NAME    := Reforge.app
 INSTALL_DIR ?= /Applications
 
-.PHONY: help build install reinstall run icon clean
+.PHONY: help build install reinstall run dev icon clean
 
 help:
 	@echo "make install   Build and (re)install $(APP_NAME) into $(INSTALL_DIR)"
 	@echo "make run       Install, then open the app"
+	@echo "make dev       Build and open a local dev copy (settings + key in ./.dev, no Keychain)"
 	@echo "make build     Build only (creates ./$(APP_NAME))"
 	@echo "make icon      Redraw the app icon from scripts/make-icon.swift"
 	@echo "make clean     Remove build outputs"
@@ -31,6 +32,12 @@ reinstall: install
 
 run: install
 	open "$(INSTALL_DIR)/$(APP_NAME)"
+
+# Opens ./Reforge.app with its settings and API key kept in ./.dev instead of
+# Application Support and the Keychain, so rebuilds never prompt for the Keychain.
+dev: build
+	@pkill -f "$(CURDIR)/$(APP_NAME)/" 2>/dev/null || true
+	open -n --env REFORGE_DEV_DIR="$(CURDIR)/.dev" "$(APP_NAME)"
 
 icon:
 	swift scripts/make-icon.swift
