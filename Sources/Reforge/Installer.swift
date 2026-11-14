@@ -11,25 +11,41 @@ enum InstallError: LocalizedError {
     }
 }
 
-enum Installer {
+/// Installs and removes addon folders; tests substitute a fake, or a real `Installer` with local hooks.
+protocol AddonInstaller {
+    func install(_ file: CFFile, replacing oldFolders: [String], addonsDir: URL) async throws -> [String]
+    func uninstall(folders: [String], addonsDir: URL) throws
+}
+
+struct Installer: AddonInstaller {
+    /// Fetches a file's zip into a local temp file that `install` then takes ownership of.
+    var download: (URL) async throws -> URL = Installer.httpDownload
+    /// Moves an item to the Trash.
+    var trash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+
+    static func httpDownload(_ url: URL) async throws -> URL {
+        let (tmp, resp) = try await Store.session.download(from: url)
+        if let code = (resp as? HTTPURLResponse)?.statusCode, code != 200 {
+            throw InstallError.tool("Download failed (HTTP \(code))")
+        }
+        return tmp
+    }
+
     /// Downloads `file`, swaps its folders into `addonsDir`, and returns the new folder list.
     /// Old folders are moved aside first and restored if anything fails.
-    static func install(_ file: CFFile, replacing oldFolders: [String], addonsDir: URL) async throws -> [String] {
+    func install(_ file: CFFile, replacing oldFolders: [String], addonsDir: URL) async throws -> [String] {
         guard let url = file.resolvedDownloadURL else { throw InstallError.noURL }
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("Reforge-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: work) }
 
-        let (tmp, resp) = try await Store.session.download(from: url)
-        if let code = (resp as? HTTPURLResponse)?.statusCode, code != 200 {
-            throw InstallError.tool("Download failed (HTTP \(code))")
-        }
+        let tmp = try await download(url)
         let zip = work.appendingPathComponent("addon.zip")
         try fm.moveItem(at: tmp, to: zip)
 
         // Reject archives with absolute paths or ".." before extracting anything.
-        let listing = try run("/usr/bin/zipinfo", ["-1", zip.path])
+        let listing = try Self.run("/usr/bin/zipinfo", ["-1", zip.path])
         for entry in listing.split(separator: "\n") {
             if entry.hasPrefix("/") || entry.split(separator: "/").contains("..") {
                 throw InstallError.badArchive("unsafe path \(entry)")
@@ -37,7 +53,7 @@ enum Installer {
         }
 
         let out = work.appendingPathComponent("x", isDirectory: true)
-        _ = try run("/usr/bin/ditto", ["-x", "-k", zip.path, out.path])
+        _ = try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, out.path])
 
         let newFolders = try fm.contentsOfDirectory(atPath: out.path)
             .filter { !$0.hasPrefix(".") && $0 != "__MACOSX" }
@@ -50,7 +66,7 @@ enum Installer {
         let backup = work.appendingPathComponent("backup", isDirectory: true)
         try fm.createDirectory(at: backup, withIntermediateDirectories: true)
         var movedAside: [String] = []
-        let toReplace = Set(oldFolders + newFolders).filter(isSafeName)
+        let toReplace = Set(oldFolders + newFolders).filter(Self.isSafeName)
         do {
             for name in toReplace {
                 let src = addonsDir.appendingPathComponent(name)
@@ -78,11 +94,11 @@ enum Installer {
     }
 
     /// Moves an addon's folders to the Trash.
-    static func uninstall(folders: [String], addonsDir: URL) throws {
-        for name in folders where isSafeName(name) {
+    func uninstall(folders: [String], addonsDir: URL) throws {
+        for name in folders where Self.isSafeName(name) {
             let url = addonsDir.appendingPathComponent(name)
             if FileManager.default.fileExists(atPath: url.path) {
-                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                try trash(url)
             }
         }
     }

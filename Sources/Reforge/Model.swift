@@ -16,28 +16,47 @@ final class Model {
     /// Lives in the Keychain, never in config.json.
     var apiKey: String = ""
 
-    init() {
-        if let saved = Store.load() {
+    // Production dependencies by default; tests inject fakes.
+    private let makeAPI: (String) -> CurseForgeClient
+    private let keyStore: KeyStore
+    private let configStore: ConfigStore
+    private let installer: AddonInstaller
+    private let curseForgeImportFile: URL
+    private let now: () -> Date
+
+    init(makeAPI: @escaping (String) -> CurseForgeClient = { CurseForgeAPI(apiKey: $0) },
+         keyStore: KeyStore = SystemKeyStore(),
+         configStore: ConfigStore = FileConfigStore(),
+         installer: AddonInstaller = Installer(),
+         curseForgeImportFile: URL = CurseForgeImport.file,
+         now: @escaping () -> Date = Date.init) {
+        self.makeAPI = makeAPI
+        self.keyStore = keyStore
+        self.configStore = configStore
+        self.installer = installer
+        self.curseForgeImportFile = curseForgeImportFile
+        self.now = now
+        if let saved = configStore.load() {
             config = saved
         } else {
             // Fresh install: the welcome flow picks the folder and imports addons.
             config = Config()
         }
-        apiKey = Keychain.read()
+        apiKey = keyStore.read()
         // One-time move of a key saved by older versions into the Keychain.
         if let legacy = config.legacyApiKey {
-            if apiKey.isEmpty, !legacy.isEmpty, Keychain.write(legacy) { apiKey = legacy }
-            if !apiKey.isEmpty || legacy.isEmpty { config.legacyApiKey = nil; Store.save(config) }
+            if apiKey.isEmpty, !legacy.isEmpty, keyStore.write(legacy) { apiKey = legacy }
+            if !apiKey.isEmpty || legacy.isEmpty { config.legacyApiKey = nil; configStore.save(config) }
         }
     }
 
-    var api: CurseForgeAPI { CurseForgeAPI(apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    var api: CurseForgeClient { makeAPI(apiKey.trimmingCharacters(in: .whitespacesAndNewlines)) }
     var addonsDir: URL { URL(fileURLWithPath: config.addonsPath, isDirectory: true) }
     var hasKey: Bool { !apiKey.trimmingCharacters(in: .whitespaces).isEmpty }
 
     func saveAPIKey() {
         apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !Keychain.write(apiKey) { message = "Couldn't save the API key to the Keychain." }
+        if !keyStore.write(apiKey) { message = "Couldn't save the API key to the Keychain." }
     }
     // MARK: Onboarding
 
@@ -55,7 +74,7 @@ final class Model {
     /// CurseForge-managed addons in the chosen folder that we don't track yet.
     func importCandidates() -> [TrackedAddon] {
         let known = Set(config.addons.map(\.id))
-        return CurseForgeImport.importAddons(addonsPath: config.addonsPath).filter { !known.contains($0.id) }
+        return CurseForgeImport.importAddons(addonsPath: config.addonsPath, from: curseForgeImportFile).filter { !known.contains($0.id) }
     }
 
     func importAddons(_ list: [TrackedAddon]) {
@@ -66,7 +85,7 @@ final class Model {
     /// Checks the key against CurseForge and saves it to the Keychain. Returns an error message on failure.
     func verifyAndSaveKey(_ key: String) async -> String? {
         do {
-            try await CurseForgeAPI(apiKey: key).validateKey()
+            try await makeAPI(key).validateKey()
         } catch CFError.http(403, _) {
             return "CurseForge didn't accept that key. It should start with $2a$10$."
         } catch {
@@ -79,10 +98,10 @@ final class Model {
 
     var updatable: [TrackedAddon] { config.addons.filter { status[$0.id] == .updateAvailable } }
 
-    func save() { Store.save(config) }
+    func save() { configStore.save(config) }
 
     func reimportFromCurseForge() {
-        let imported = CurseForgeImport.importAddons(addonsPath: config.addonsPath)
+        let imported = CurseForgeImport.importAddons(addonsPath: config.addonsPath, from: curseForgeImportFile)
         let known = Set(config.addons.map(\.id))
         let new = imported.filter { !known.contains($0.id) }
         config.addons += new
@@ -110,7 +129,7 @@ final class Model {
                     status[a.id] = f.id > a.fileId ? .updateAvailable : .upToDate
                 }
             }
-            lastChecked = Date()
+            lastChecked = now()
             let n = updatable.count
             message = n == 0 ? "Everything is up to date." : "\(n) update\(n == 1 ? "" : "s") available."
         } catch {
@@ -122,7 +141,7 @@ final class Model {
         guard let file = latest[addon.id] else { return }
         status[addon.id] = .working
         do {
-            let folders = try await Installer.install(file, replacing: addon.folders, addonsDir: addonsDir)
+            let folders = try await installer.install(file, replacing: addon.folders, addonsDir: addonsDir)
             if let i = config.addons.firstIndex(where: { $0.id == addon.id }) {
                 config.addons[i].fileId = file.id
                 config.addons[i].version = file.displayName
@@ -167,7 +186,7 @@ final class Model {
                 message = "\(mod.name) has no file for this game version."; return
             }
             message = "Installing \(mod.name)…"
-            let folders = try await Installer.install(file, replacing: [], addonsDir: addonsDir)
+            let folders = try await installer.install(file, replacing: [], addonsDir: addonsDir)
             config.addons.append(TrackedAddon(id: mod.id, name: mod.name, fileId: file.id, version: file.displayName,
                                               fileDate: file.fileDate, folders: folders,
                                               websiteURL: mod.links?.websiteUrl))
@@ -182,7 +201,7 @@ final class Model {
 
     func remove(_ addon: TrackedAddon, deleteFiles: Bool) {
         if deleteFiles {
-            do { try Installer.uninstall(folders: addon.folders, addonsDir: addonsDir) }
+            do { try installer.uninstall(folders: addon.folders, addonsDir: addonsDir) }
             catch { message = error.localizedDescription; return }
         }
         config.addons.removeAll { $0.id == addon.id }

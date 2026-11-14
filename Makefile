@@ -2,18 +2,30 @@
 APP_NAME    := Reforge.app
 INSTALL_DIR ?= /Applications
 
-.PHONY: help build install reinstall run dev icon clean
+.PHONY: help build test install reinstall run dev icon clean
 
 help:
 	@echo "make install   Build and (re)install $(APP_NAME) into $(INSTALL_DIR)"
 	@echo "make run       Install, then open the app"
 	@echo "make dev       Build and open a local dev copy (settings + key in ./.dev, no Keychain)"
 	@echo "make build     Build only (creates ./$(APP_NAME))"
+	@echo "make test      Run the headless test suite (swift test)"
 	@echo "make icon      Redraw the app icon from scripts/make-icon.swift"
 	@echo "make clean     Remove build outputs"
 
 build:
 	./build.sh
+
+# With only the Command Line Tools (no Xcode), Swift Testing sits outside the default search
+# paths and its Foundation cross-import overlay ships without a module, so point swift at it.
+CLT_FRAMEWORKS := /Library/Developer/CommandLineTools/Library/Developer/Frameworks
+ifeq ($(shell xcode-select -p 2>/dev/null),/Library/Developer/CommandLineTools)
+TEST_FLAGS := -Xswiftc -F -Xswiftc $(CLT_FRAMEWORKS) -Xswiftc -Xfrontend -Xswiftc -disable-cross-import-overlays \
+	-Xlinker -rpath -Xlinker $(CLT_FRAMEWORKS)
+endif
+
+test:
+	swift test $(TEST_FLAGS) $(ARGS)
 
 # Quits the running app, then replaces the installed copy with a fresh build.
 # The old copy is moved into a temp folder rather than deleted in place.

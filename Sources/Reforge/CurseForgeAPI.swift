@@ -55,7 +55,16 @@ enum CFError: LocalizedError {
     }
 }
 
-struct CurseForgeAPI {
+/// The CurseForge calls Model makes; tests substitute a fake.
+protocol CurseForgeClient {
+    func validateKey() async throws
+    func mods(_ ids: [Int]) async throws -> [CFMod]
+    func mod(_ id: Int) async throws -> CFMod
+    func files(_ ids: [Int]) async throws -> [CFFile]
+    func mod(slug: String) async throws -> CFMod?
+}
+
+struct CurseForgeAPI: CurseForgeClient {
     let apiKey: String
     private let base = URL(string: "https://api.curseforge.com")!
     private struct Wrap<T: Decodable>: Decodable { let data: T }

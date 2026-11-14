@@ -28,24 +28,38 @@ struct Config: Codable {
     }
 }
 
+/// Where Model persists its config; tests pass a temp dir or an in-memory store.
+protocol ConfigStore {
+    func load() -> Config?
+    func save(_ config: Config)
+}
+
+/// config.json in `dir` (the app's real settings folder by default).
+struct FileConfigStore: ConfigStore {
+    var dir = Store.dir
+    func load() -> Config? { Store.load(dir: dir) }
+    func save(_ config: Config) { Store.save(config, dir: dir) }
+}
+
 enum Store {
     static let dir = DevMode.dir ?? FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Reforge", isDirectory: true)
-    static let file = dir.appendingPathComponent("config.json")
     /// Where settings lived before the app was renamed from "Addon Updater".
     private static let legacyDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/AddonUpdater", isDirectory: true)
 
-    static func load() -> Config? {
+    static func load(dir: URL = dir) -> Config? {
         let fm = FileManager.default
-        if DevMode.dir == nil, !fm.fileExists(atPath: file.path), fm.fileExists(atPath: legacyDir.appendingPathComponent("config.json").path) {
+        let file = dir.appendingPathComponent("config.json")
+        if dir == Store.dir, DevMode.dir == nil, !fm.fileExists(atPath: file.path), fm.fileExists(atPath: legacyDir.appendingPathComponent("config.json").path) {
             try? fm.moveItem(at: legacyDir, to: dir)
         }
         guard let data = try? Data(contentsOf: file) else { return nil }
         return try? decoder.decode(Config.self, from: data)
     }
 
-    static func save(_ config: Config) {
+    static func save(_ config: Config, dir: URL = dir) {
+        let file = dir.appendingPathComponent("config.json")
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let enc = JSONEncoder()
@@ -94,7 +108,7 @@ enum CurseForgeImport {
     static let file = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/CurseForge/agent/GameInstances/AddonGameInstance.json")
 
-    static func importAddons(addonsPath: String) -> [TrackedAddon] {
+    static func importAddons(addonsPath: String, from file: URL = file) -> [TrackedAddon] {
         guard let data = try? Data(contentsOf: file),
               let instances = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
         let wanted = URL(fileURLWithPath: addonsPath).standardized.path

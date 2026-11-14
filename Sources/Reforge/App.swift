@@ -340,7 +340,7 @@ private struct EmptyState: View {
     }
 }
 
-private struct AddSheet: View {
+struct AddSheet: View {
     let model: Model
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""

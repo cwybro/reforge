@@ -85,7 +85,7 @@ struct OnboardingView: View {
 
 // MARK: - Steps
 
-private struct WelcomeStep: View {
+struct WelcomeStep: View {
     let next: () -> Void
     @Environment(\.parallax) private var parallax
     @Environment(\.controlActiveState) private var activeState
@@ -140,7 +140,7 @@ private struct WelcomeStep: View {
     }
 }
 
-private struct FolderStep: View {
+struct FolderStep: View {
     @Bindable var model: Model
     let next: () -> Void
     let back: () -> Void
@@ -206,7 +206,7 @@ private struct FolderStep: View {
     }
 }
 
-private struct KeyStep: View {
+struct KeyStep: View {
     @Bindable var model: Model
     let next: () -> Void
     let back: () -> Void
@@ -268,7 +268,7 @@ private struct KeyStep: View {
     }
 }
 
-private struct ImportStep: View {
+struct ImportStep: View {
     @Bindable var model: Model
     let next: () -> Void
     let back: () -> Void
@@ -315,7 +315,7 @@ private struct ImportStep: View {
     }
 }
 
-private struct DoneStep: View {
+struct DoneStep: View {
     let count: Int
     let finish: () -> Void
     @State private var pop = false

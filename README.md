@@ -61,12 +61,14 @@ Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Ref
 | `make install` | Build and install to `/Applications` (quits the running copy first) |
 | `make run` | Install, then open the app |
 | `make build` | Build `Reforge.app` in the project folder |
+| `make test` | Run the test suite: headless flow tests (Swift Testing) with the network, Keychain and your real folders stubbed out |
 | `make dev` | Build and open a dev copy that keeps its settings and API key in `./.dev` (git-ignored) instead of Application Support and the Keychain, so rebuilds never trigger Keychain prompts |
 | `make icon` | Redraw the app icon |
 | `make clean` | Remove build output |
 
 ```
 Sources/Reforge/          SwiftUI app, CurseForge client, installer, Keychain storage
+Tests/ReforgeTests/       Flow tests driving Model with fakes, plus view smoke tests
 Resources/                App icon
 scripts/make-icon.swift   Draws the app icon (the ᚱ rune ring)
 scripts/make-banner.swift Draws the README banner

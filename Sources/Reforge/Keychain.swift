@@ -1,6 +1,18 @@
 import Foundation
 import Security
 
+/// Where Model keeps the API key; tests substitute an in-memory store.
+protocol KeyStore {
+    func read() -> String
+    func write(_ key: String) -> Bool
+}
+
+/// The login Keychain, or the `.dev` key file in dev mode.
+struct SystemKeyStore: KeyStore {
+    func read() -> String { Keychain.read() }
+    func write(_ key: String) -> Bool { Keychain.write(key) }
+}
+
 /// Stores the CurseForge API key in the user's login Keychain.
 enum Keychain {
     private static let service = "local.reforge"
