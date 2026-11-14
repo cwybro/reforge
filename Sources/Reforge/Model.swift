@@ -23,14 +23,18 @@ final class Model {
     private let installer: AddonInstaller
     private let curseForgeImportFile: URL
     private let now: () -> Date
+    /// Asks the user for a folder, starting at the given one; nil if they cancel.
+    let chooseFolder: @MainActor (URL) -> URL?
 
     init(makeAPI: @escaping (String) -> CurseForgeClient = { CurseForgeAPI(apiKey: $0) },
          keyStore: KeyStore = SystemKeyStore(),
          configStore: ConfigStore = FileConfigStore(),
          installer: AddonInstaller = Installer(),
          curseForgeImportFile: URL = CurseForgeImport.file,
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         chooseFolder: @escaping @MainActor (URL) -> URL? = FolderPicker.openPanel) {
         self.makeAPI = makeAPI
+        self.chooseFolder = chooseFolder
         self.keyStore = keyStore
         self.configStore = configStore
         self.installer = installer

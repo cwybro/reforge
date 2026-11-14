@@ -48,7 +48,7 @@ final class FakeCurseForge: CurseForgeClient {
 
     private func call(_ name: String) throws {
         calls.append(name)
-        if key.isEmpty { throw CFError.noKey }
+        if key.isEmpty { throw Reforge.CFError.noKey }
     }
 
     func validateKey() async throws {
@@ -63,7 +63,7 @@ final class FakeCurseForge: CurseForgeClient {
     func mod(_ id: Int) async throws -> CFMod {
         try call("mod(\(id))")
         if let error { throw error }
-        guard let m = modsById[id] else { throw CFError.http(404, "not found") }
+        guard let m = modsById[id] else { throw Reforge.CFError.http(404, "not found") }
         return m
     }
     func files(_ ids: [Int]) async throws -> [CFFile] {

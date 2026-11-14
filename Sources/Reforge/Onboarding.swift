@@ -130,6 +130,7 @@ struct WelcomeStep: View {
             Button("Get Started", action: next)
                 .buttonStyle(GlowButtonStyle())
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("onboarding.getStarted")
                 .padding(.top, 40)
         }
         .opacity(appear ? 1 : 0)
@@ -175,8 +176,10 @@ struct FolderStep: View {
                         .foregroundStyle(.white.opacity(0.85))
                         .lineLimit(1)
                         .truncationMode(.head)
+                        .accessibilityIdentifier("onboarding.folder.path")
                     Spacer(minLength: 8)
                     Button("Change…", action: choose)
+                        .accessibilityIdentifier("onboarding.folder.change")
                 }
                 .padding(12)
                 .background(Card())
@@ -190,7 +193,7 @@ struct FolderStep: View {
             }
             .animation(.easeInOut(duration: 0.25), value: folderExists)
 
-            NavRow(back: back, title: "Continue", enabled: folderExists) {
+            NavRow(id: "onboarding.folder", back: back, title: "Continue", enabled: folderExists) {
                 model.save()
                 next()
             }
@@ -198,11 +201,9 @@ struct FolderStep: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.directoryURL = URL(fileURLWithPath: model.config.addonsPath)
-        if panel.runModal() == .OK, let url = panel.url { model.config.addonsPath = url.path }
+        if let url = model.chooseFolder(URL(fileURLWithPath: model.config.addonsPath)) {
+            model.config.addonsPath = url.path
+        }
     }
 }
 
@@ -226,10 +227,12 @@ struct KeyStep: View {
                     .padding(12)
                     .background(Card())
                     .onSubmit(verify)
+                    .accessibilityIdentifier("onboarding.key.field")
 
                 Group {
                     if let error {
                         Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(Theme.magenta)
+                            .accessibilityIdentifier("onboarding.key.error")
                     } else if model.hasKey && trimmed.isEmpty {
                         Label("You're connected to CurseForge.", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.cyan)
                     } else {
@@ -250,7 +253,7 @@ struct KeyStep: View {
             }
             .animation(.easeInOut(duration: 0.25), value: error)
 
-            NavRow(back: back, title: verifying ? "Checking…" : "Continue",
+            NavRow(id: "onboarding.key", back: back, title: verifying ? "Checking…" : "Continue",
                    enabled: !verifying && (model.hasKey || !trimmed.isEmpty), action: verify)
         }
     }
@@ -303,7 +306,7 @@ struct ImportStep: View {
                 .frame(maxHeight: 130)
             }
 
-            NavRow(back: back,
+            NavRow(id: "onboarding.import", back: back,
                    title: found.isEmpty ? "Continue" : "Import \(found.count) Addon\(found.count == 1 ? "" : "s")",
                    enabled: true,
                    skip: found.isEmpty ? nil : next) {
@@ -348,6 +351,7 @@ struct DoneStep: View {
             Button("Open Reforge", action: finish)
                 .buttonStyle(GlowButtonStyle())
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("onboarding.done.open")
                 .padding(.top, 38)
         }
         .onAppear { withAnimation(.spring(response: 0.6, dampingFraction: 0.55).delay(0.15)) { pop = true } }
@@ -392,6 +396,8 @@ private struct StepLayout<Content: View>: View {
 }
 
 private struct NavRow: View {
+    /// Accessibility identifier prefix: "<id>.back", "<id>.skip", "<id>.continue".
+    let id: String
     var back: (() -> Void)?
     let title: String
     let enabled: Bool
@@ -400,13 +406,14 @@ private struct NavRow: View {
 
     var body: some View {
         HStack {
-            if let back { Button("Back", action: back).buttonStyle(QuietButtonStyle()) }
+            if let back { Button("Back", action: back).buttonStyle(QuietButtonStyle()).accessibilityIdentifier("\(id).back") }
             Spacer()
-            if let skip { Button("Skip", action: skip).buttonStyle(QuietButtonStyle()) }
+            if let skip { Button("Skip", action: skip).buttonStyle(QuietButtonStyle()).accessibilityIdentifier("\(id).skip") }
             Button(title, action: action)
                 .buttonStyle(GlowButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!enabled)
+                .accessibilityIdentifier("\(id).continue")
         }
         .padding(.top, 22)
     }

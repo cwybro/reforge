@@ -9,7 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct ReforgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = Model()
+    /// Production dependencies, unless REFORGE_E2E_FIXTURE selects the E2E stubs (see E2EStubs.swift).
+    @State private var model = E2E.makeModel() ?? Model()
 
     var body: some Scene {
         Window("Reforge", id: "main") {
@@ -132,6 +133,7 @@ struct ContentView: View {
                 }
                 if model.config.addons.isEmpty {
                     EmptyState().frame(maxHeight: .infinity)
+                        .accessibilityIdentifier("main.empty")
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 8) {
@@ -143,6 +145,7 @@ struct ContentView: View {
                         .padding(.vertical, 4)
                         .padding(.bottom, 12)
                     }
+                    .accessibilityIdentifier("main.list")
                 }
                 StatusBar(model: model)
             }
@@ -186,6 +189,7 @@ private struct Header: View {
                 .buttonStyle(CircleIconButtonStyle())
                 .help("Add an addon")
                 .disabled(!model.hasKey)
+                .accessibilityIdentifier("header.add")
             Button { Task { await model.checkForUpdates() } } label: {
                 Image(systemName: "arrow.clockwise")
                     .rotationEffect(.degrees(model.checking ? 360 : 0))
@@ -195,12 +199,14 @@ private struct Header: View {
             .buttonStyle(CircleIconButtonStyle())
             .help("Check for updates (⌘R)")
             .disabled(!model.hasKey || model.checking)
+            .accessibilityIdentifier("header.refresh")
             Button { Task { await model.updateAll() } } label: {
                 Label(model.updatable.isEmpty ? "Update All" : "Update All (\(model.updatable.count))",
                       systemImage: "arrow.down.circle.fill")
             }
             .buttonStyle(GlowButtonStyle(compact: true))
             .disabled(model.updatable.isEmpty)
+            .accessibilityIdentifier("header.updateAll")
         }
         // Leave room for the window's close/minimise/zoom buttons on the left.
         .padding(.leading, 86)
@@ -224,6 +230,7 @@ private struct AddonRow: View {
                 Text(addon.name)
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
+                    .accessibilityIdentifier("addonRow.\(addon.id).name")
                 Text(addon.folders.joined(separator: ", "))
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.42))
@@ -232,6 +239,8 @@ private struct AddonRow: View {
             Spacer(minLength: 12)
             versions
                 .frame(maxWidth: 280, alignment: .trailing)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("addonRow.\(addon.id).version")
             StatusCell(addon: addon, model: model)
                 .frame(width: 104, alignment: .trailing)
         }
@@ -247,6 +256,8 @@ private struct AddonRow: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.15), value: hovering)
         .animation(.easeInOut(duration: 0.3), value: status)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("addonRow.\(addon.id)")
         .contextMenu {
             if let s = addon.websiteURL, let u = URL(string: s) {
                 Button("Open on CurseForge") { NSWorkspace.shared.open(u) }
@@ -293,17 +304,21 @@ struct StatusCell: View {
             Label("Up to date", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(Theme.cyan.opacity(0.75))
+                .accessibilityIdentifier("addonRow.\(addon.id).upToDate")
         case .working:
             ProgressView().controlSize(.small)
+                .accessibilityIdentifier("addonRow.\(addon.id).working")
         case .updateAvailable:
             Button("Update") { Task { await model.update(addon) } }
                 .buttonStyle(GlowButtonStyle(compact: true))
+                .accessibilityIdentifier("addonRow.\(addon.id).update")
         case .failed(let err):
             Button { Task { await model.update(addon) } } label: {
                 Label("Retry", systemImage: "exclamationmark.triangle.fill")
             }
             .buttonStyle(QuietButtonStyle(tint: Theme.magenta))
             .help(err)
+            .accessibilityIdentifier("addonRow.\(addon.id).retry")
         }
     }
 }
@@ -315,8 +330,10 @@ private struct StatusBar: View {
         HStack {
             Text(model.message ?? (model.lastChecked.map { "Checked at \($0.formatted(date: .omitted, time: .shortened))" } ?? " "))
                 .lineLimit(1)
+                .accessibilityIdentifier("status.message")
             Spacer()
             Text("\(model.config.addons.count) addon\(model.config.addons.count == 1 ? "" : "s")")
+                .accessibilityIdentifier("status.count")
         }
         .font(.system(size: 12, design: .rounded))
         .foregroundStyle(.white.opacity(0.55))
@@ -358,15 +375,18 @@ struct AddSheet: View {
                 .padding(11)
                 .background(Card())
                 .onSubmit(submit)
+                .accessibilityIdentifier("addSheet.field")
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(QuietButtonStyle())
                     .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("addSheet.cancel")
                 Button("Install", action: submit)
                     .buttonStyle(GlowButtonStyle(compact: true))
                     .keyboardShortcut(.defaultAction)
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .accessibilityIdentifier("addSheet.install")
             }
         }
         .padding(24)
@@ -400,6 +420,7 @@ struct KeyBanner: View {
                     .textFieldStyle(.plain)
                     .padding(8)
                     .background(Card())
+                    .accessibilityIdentifier("keyBanner.field")
             }
             Button("Save") {
                 Task {
@@ -412,6 +433,7 @@ struct KeyBanner: View {
             }
             .buttonStyle(GlowButtonStyle(compact: true))
             .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+            .accessibilityIdentifier("keyBanner.save")
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -446,6 +468,17 @@ struct CircleIconButtonStyle: ButtonStyle {
 
 // MARK: - Settings
 
+/// The system folder picker. Stub mode swaps in a fixed answer (see E2EStubs.swift).
+enum FolderPicker {
+    @MainActor static func openPanel(startingAt dir: URL) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = dir
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+}
+
 struct SettingsView: View {
     @Bindable var model: Model
 
@@ -453,14 +486,14 @@ struct SettingsView: View {
         Form {
             SecureField("CurseForge API key", text: $model.apiKey)
                 .onSubmit { model.saveAPIKey() }
+                .accessibilityIdentifier("settings.key")
             HStack {
                 TextField("AddOns folder", text: $model.config.addonsPath)
+                    .accessibilityIdentifier("settings.folder")
                 Button("Choose…") {
-                    let p = NSOpenPanel()
-                    p.canChooseDirectories = true; p.canChooseFiles = false
-                    p.directoryURL = model.addonsDir
-                    if p.runModal() == .OK, let u = p.url { model.config.addonsPath = u.path }
+                    if let u = model.chooseFolder(model.addonsDir) { model.config.addonsPath = u.path }
                 }
+                .accessibilityIdentifier("settings.chooseFolder")
             }
             Picker("Game version", selection: $model.config.gameVersionTypeId) {
                 Text("Retail").tag(517)
@@ -468,8 +501,11 @@ struct SettingsView: View {
                 Text("Mists Classic").tag(79434)
                 Text("Anniversary").tag(73246)
             }
+            .accessibilityIdentifier("settings.gameVersion")
             Toggle("Include beta/alpha releases", isOn: $model.config.allowPrerelease)
+                .accessibilityIdentifier("settings.prerelease")
             Button("Import Addons from CurseForge App") { model.reimportFromCurseForge() }
+                .accessibilityIdentifier("settings.import")
         }
         .padding(20)
         .frame(width: 520)

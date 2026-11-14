@@ -85,7 +85,7 @@ struct CheckForUpdatesTests {
 
     @Test func networkErrorSurfaces() async throws {
         let env = try updatesEnv()
-        env.api.error = CFError.http(500, "upstream down")
+        env.api.error = Reforge.CFError.http(500, "upstream down")
         let model = env.makeModel()
         await model.checkForUpdates()
         #expect(model.message == "CurseForge API error 500: upstream down")

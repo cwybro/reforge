@@ -24,19 +24,53 @@ struct InstallerTests {
         #expect(env.marker("Unrelated") == "old")
     }
 
-    /// Fail mid-swap: "B" is a dangling symlink, so it isn't moved aside and moving the new "B" in fails.
+    /// Fail mid-swap: moving the new "B" into place fails after "A" already went in.
     @Test func failedSwapRestoresOldFolders() async throws {
         let env = try TestEnv()
         try env.makeFolder("A", marker: "original A")
         try env.makeFolder("Legacy", marker: "original Legacy")
-        try FileManager.default.createSymbolicLink(at: env.addonsDir.appendingPathComponent("B"),
-                                                   withDestinationURL: env.dir.appendingPathComponent("nowhere"))
         let zip = ZipWriter.make([("A/", ""), ("A/A.toc", "new A"), ("B/", ""), ("B/B.toc", "new B")])
+        var installer = try localInstaller(env, zip: zip)
+        installer.move = { src, dst in
+            if src.lastPathComponent == "B" { throw CocoaError(.fileWriteUnknown) }
+            try FileManager.default.moveItem(at: src, to: dst)
+        }
         await #expect(throws: (any Error).self) {
-            try await localInstaller(env, zip: zip).install(file, replacing: ["A", "Legacy"], addonsDir: env.addonsDir)
+            try await installer.install(file, replacing: ["A", "Legacy"], addonsDir: env.addonsDir)
         }
         #expect(env.marker("A") == "original A")
         #expect(env.marker("Legacy") == "original Legacy")
+        #expect(!env.exists("B"))
+    }
+
+    /// A dangling symlink where a new folder goes (e.g. a dev checkout that moved) is replaced on success.
+    @Test func danglingSymlinkIsReplaced() async throws {
+        let env = try TestEnv()
+        let link = env.addonsDir.appendingPathComponent("B")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: env.dir.appendingPathComponent("nowhere"))
+        let zip = ZipWriter.make([("B/", ""), ("B/B.toc", "new B")])
+        let folders = try await localInstaller(env, zip: zip).install(file, replacing: [], addonsDir: env.addonsDir)
+        #expect(folders == ["B"])
+        #expect(env.marker("B") == "new B")
+    }
+
+    /// Rollback must put a dangling symlink back rather than delete it.
+    @Test func danglingSymlinkSurvivesRollback() async throws {
+        let env = try TestEnv()
+        let link = env.addonsDir.appendingPathComponent("B")
+        let target = env.dir.appendingPathComponent("nowhere")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        let zip = ZipWriter.make([("A/", ""), ("A/A.toc", "new A"), ("B/", ""), ("B/B.toc", "new B")])
+        var installer = try localInstaller(env, zip: zip)
+        installer.move = { src, dst in
+            if src.lastPathComponent == "B" { throw CocoaError(.fileWriteUnknown) }
+            try FileManager.default.moveItem(at: src, to: dst)
+        }
+        await #expect(throws: (any Error).self) {
+            try await installer.install(file, replacing: [], addonsDir: env.addonsDir)
+        }
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == target.path)
+        #expect(!env.exists("A"))
     }
 
     @Test(arguments: [

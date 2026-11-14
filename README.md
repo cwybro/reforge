@@ -60,8 +60,9 @@ Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Ref
 |---|---|
 | `make install` | Build and install to `/Applications` (quits the running copy first) |
 | `make run` | Install, then open the app |
-| `make build` | Build `Reforge.app` in the project folder |
+| `make build` | Build `build/Reforge Dev.app` (git-ignored): a separate app (bundle ID `local.reforge.dev`) that never competes with the installed `Reforge.app` |
 | `make test` | Run the test suite: headless flow tests (Swift Testing) with the network, Keychain and your real folders stubbed out |
+| `make e2e` | Build `build/Reforge Dev.app`, then run end-to-end smoke tests that launch it in stub mode (fixture-backed CurseForge, temp settings, recorded installs: no network, Keychain or real AddOns folder) and drive it through the Accessibility API. Opt-in and not part of `make test`. Needs Accessibility permission for your terminal or IDE (System Settings → Privacy & Security → Accessibility); briefly opens app windows |
 | `make dev` | Build and open a dev copy that keeps its settings and API key in `./.dev` (git-ignored) instead of Application Support and the Keychain, so rebuilds never trigger Keychain prompts |
 | `make icon` | Redraw the app icon |
 | `make clean` | Remove build output |
@@ -69,12 +70,13 @@ Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Ref
 ```
 Sources/Reforge/          SwiftUI app, CurseForge client, installer, Keychain storage
 Tests/ReforgeTests/       Flow tests driving Model with fakes, plus view smoke tests
+Tests/ReforgeE2ETests/    Opt-in end-to-end tests driving Reforge Dev.app via Accessibility (make e2e)
 Resources/                App icon
 scripts/make-icon.swift   Draws the app icon (the ᚱ rune ring)
 scripts/make-banner.swift Draws the README banner
 docs/                     README images
 Package.swift             Swift Package Manager manifest
-build.sh                  Compiles and packages Reforge.app
+build.sh                  Packages build/Reforge Dev.app, or Reforge.app for make install
 Makefile                  Shortcuts for the above
 ```
 

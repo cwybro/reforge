@@ -17,7 +17,7 @@ struct APIKeyTests {
 
     @Test func rejectedKeyIsNotSaved() async throws {
         let env = try TestEnv()
-        env.api.validateError = CFError.http(403, "Forbidden")
+        env.api.validateError = Reforge.CFError.http(403, "Forbidden")
         let model = env.makeModel()
         let err = await model.verifyAndSaveKey("cfc_wrongkind")
         #expect(err == "CurseForge didn't accept that key. It should start with $2a$10$.")
@@ -28,7 +28,7 @@ struct APIKeyTests {
 
     @Test func otherErrorsAreReported() async throws {
         let env = try TestEnv(key: "$2a$10$old")
-        env.api.validateError = CFError.http(500, "oops")
+        env.api.validateError = Reforge.CFError.http(500, "oops")
         let model = env.makeModel()
         let err = await model.verifyAndSaveKey("$2a$10$new")
         #expect(err == "CurseForge API error 500: oops")
@@ -46,7 +46,7 @@ struct APIKeyTests {
 
     /// The real client refuses an empty key before building any request.
     @Test func realClientRejectsEmptyKeyWithoutNetwork() async {
-        await #expect(throws: CFError.self) { try await CurseForgeAPI(apiKey: "").validateKey() }
+        await #expect(throws: Reforge.CFError.self) { try await CurseForgeAPI(apiKey: "").validateKey() }
     }
 
     @Test func saveTrimsAndReportsKeyStoreFailure() throws {

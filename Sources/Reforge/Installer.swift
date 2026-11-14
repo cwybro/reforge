@@ -22,6 +22,8 @@ struct Installer: AddonInstaller {
     var download: (URL) async throws -> URL = Installer.httpDownload
     /// Moves an item to the Trash.
     var trash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+    /// Moves a freshly extracted folder into the AddOns folder.
+    var move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
 
     static func httpDownload(_ url: URL) async throws -> URL {
         let (tmp, resp) = try await Store.session.download(from: url)
@@ -70,13 +72,13 @@ struct Installer: AddonInstaller {
         do {
             for name in toReplace {
                 let src = addonsDir.appendingPathComponent(name)
-                if fm.fileExists(atPath: src.path) {
+                if Self.itemExists(at: src) {
                     try fm.moveItem(at: src, to: backup.appendingPathComponent(name))
                     movedAside.append(name)
                 }
             }
             for name in newFolders {
-                try fm.moveItem(at: out.appendingPathComponent(name), to: addonsDir.appendingPathComponent(name))
+                try move(out.appendingPathComponent(name), addonsDir.appendingPathComponent(name))
             }
         } catch {
             // Roll back: remove anything partially installed, restore originals.
@@ -97,10 +99,16 @@ struct Installer: AddonInstaller {
     func uninstall(folders: [String], addonsDir: URL) throws {
         for name in folders where Self.isSafeName(name) {
             let url = addonsDir.appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: url.path) {
+            if Self.itemExists(at: url) {
                 try trash(url)
             }
         }
+    }
+
+    /// True if anything is at `url`, including a symlink whose target is gone. (`fileExists`
+    /// follows symlinks, so it reports a dangling link as missing and rollback would delete it.)
+    static func itemExists(at url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
     private static func isSafeName(_ s: String) -> Bool {
