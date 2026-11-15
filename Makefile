@@ -65,11 +65,11 @@ reinstall: install
 run: install
 	open "$(INSTALL_DIR)/$(APP_NAME)"
 
-# Opens "build/Reforge Dev.app" with its settings and API key kept in ./.dev instead of
-# Application Support and the Keychain, so rebuilds never prompt for the Keychain.
+# Opens "build/Reforge Dev.app". Dev builds always keep their settings and API key in ./.dev
+# instead of Application Support and the Keychain, so rebuilds never prompt for the Keychain.
 dev: build
 	@pkill -f "$(CURDIR)/$(DEV_APP)/" 2>/dev/null || true
-	open -n --env REFORGE_DEV_DIR="$(CURDIR)/.dev" "$(DEV_APP)"
+	open -n "$(DEV_APP)""
 
 icon:
 	swift scripts/make-icon.swift

@@ -10,8 +10,9 @@ with the newest one (`scripts/pick-sdk.sh`).
 - `./build.sh` (or `make build`): optimized build, bundled and signed as `build/Reforge Dev.app` (git-ignored)
   (bundle ID `local.reforge.dev`), so it never competes with the installed `Reforge.app`. Only
   `make install` builds the real `local.reforge` identity, in a temp folder.
-- `make dev`: build and open a dev copy. Its settings and API key live in `./.dev/`, so it never
-  touches the Keychain or your real config.
+- `make dev`: build and open a dev copy. Dev builds always keep their settings and API key in
+  `./.dev/` (the path is baked into their Info.plist), however they're opened, so they never touch
+  the Keychain or your real config.
 - Don't run `make install` / `make run` (they replace `/Applications/Reforge.app`) unless asked.
 
 ## Validate

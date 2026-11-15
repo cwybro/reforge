@@ -128,7 +128,8 @@ final class Model {
 
     /// Re-applies the saved schedule at launch, e.g. after the app was moved or reinstalled.
     func syncBackgroundChecks() {
-        try? scheduler.set(hours: config.backgroundCheckHours)
+        do { try scheduler.set(hours: config.backgroundCheckHours) }
+        catch { NSLog("Reforge: couldn't sync background checks: \(error.localizedDescription)") }
     }
 
     var updatable: [TrackedAddon] { config.addons.filter { status[$0.id] == .updateAvailable } }

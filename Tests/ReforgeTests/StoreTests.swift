@@ -65,4 +65,12 @@ struct StoreTests {
                        releaseType: 1, downloadUrl: nil, modules: nil)
         #expect(f.resolvedDownloadURL?.absoluteString == "https://edge.forgecdn.net/files/4567/890/My%20Addon.zip")
     }
+
+    @Test func devModeComesFromTheDevBundleOrTheEnvironment() {
+        let bundled: [String: Any] = [DevMode.infoKey: "/repo/.dev"]
+        #expect(DevMode.resolve(environment: [:], info: bundled)?.path == "/repo/.dev")
+        #expect(DevMode.resolve(environment: ["REFORGE_DEV_DIR": "/elsewhere"], info: bundled)?.path == "/elsewhere")
+        #expect(DevMode.resolve(environment: ["REFORGE_DEV_DIR": ""], info: bundled)?.path == "/repo/.dev")
+        #expect(DevMode.resolve(environment: [:], info: [:]) == nil, "release builds use the real locations")
+    }
 }

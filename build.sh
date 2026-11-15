@@ -14,8 +14,11 @@ mkdir -p "$OUT"
 SDK="$(scripts/pick-sdk.sh)"
 [[ -n "$SDK" ]] && export SDKROOT="$SDK"
 case "$VARIANT" in
-  dev)     NAME="Reforge Dev"; BUNDLE_ID="local.reforge.dev" ;;
-  release) NAME="Reforge";     BUNDLE_ID="local.reforge" ;;
+  dev)     NAME="Reforge Dev"; BUNDLE_ID="local.reforge.dev"
+           # Dev builds always keep settings and the key in ./.dev, however they're opened (see DevMode.swift).
+           DEV_DIR="$PWD/.dev"; DEV_DIR="${DEV_DIR//&/&amp;}"; DEV_DIR="${DEV_DIR//</&lt;}"
+           EXTRA_PLIST="  <key>ReforgeDevDir</key><string>$DEV_DIR</string>" ;;
+  release) NAME="Reforge";     BUNDLE_ID="local.reforge"; EXTRA_PLIST="" ;;
   *) echo "usage: $0 [dev|release] [output dir]" >&2; exit 1 ;;
 esac
 swift build -c release
@@ -38,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+$EXTRA_PLIST
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP"
