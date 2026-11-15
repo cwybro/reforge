@@ -4,9 +4,22 @@ import AppKit
 /// Quit when the window closes so the app uses nothing while you're not looking at it.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if E2E.isActive { E2E.stayOutOfTheWay() }
+    }
 }
 
+/// The LaunchAgent runs this executable with `--background-check` (see BackgroundCheck.swift):
+/// check once and exit without starting the UI. Anything else opens the app.
 @main
+enum Entry {
+    @MainActor static func main() {
+        if CommandLine.arguments.contains(BackgroundCheck.argument) { BackgroundCheck.runFromLaunchAgent() }
+        ReforgeApp.main()
+    }
+}
+
 struct ReforgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// Production dependencies, unless REFORGE_E2E_FIXTURE selects the E2E stubs (see E2EStubs.swift).
@@ -59,6 +72,7 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .tint(Theme.magenta)
         .background(WindowConfigurator())
+        .task { model.syncBackgroundChecks() }
     }
 }
 
@@ -504,6 +518,26 @@ struct SettingsView: View {
             .accessibilityIdentifier("settings.gameVersion")
             Toggle("Include beta/alpha releases", isOn: $model.config.allowPrerelease)
                 .accessibilityIdentifier("settings.prerelease")
+            Toggle("Check for updates while Reforge is closed", isOn: Binding(
+                get: { model.config.backgroundCheckHours != nil },
+                set: { on in Task { await model.setBackgroundChecks(hours: on ? BackgroundCheck.defaultHours : nil) } }))
+                .accessibilityIdentifier("settings.backgroundCheck")
+            Picker("Check", selection: Binding(
+                get: { model.config.backgroundCheckHours ?? BackgroundCheck.defaultHours },
+                set: { hours in Task { await model.setBackgroundChecks(hours: hours) } })) {
+                ForEach(BackgroundCheck.intervals, id: \.self) { h in
+                    Text(h == 24 ? "Once a day" : h == 1 ? "Every hour" : "Every \(h) hours").tag(h)
+                }
+            }
+            .disabled(model.config.backgroundCheckHours == nil)
+            .accessibilityIdentifier("settings.backgroundInterval")
+            if let problem = model.backgroundCheckProblem {
+                Text(problem).font(.caption).foregroundStyle(.orange)
+                    .accessibilityIdentifier("settings.backgroundCheckProblem")
+            } else {
+                Text("Sends a notification when updates are available. Nothing is downloaded until you open Reforge.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Button("Import Addons from CurseForge App") { model.reimportFromCurseForge() }
                 .accessibilityIdentifier("settings.import")
         }

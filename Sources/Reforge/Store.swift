@@ -22,9 +22,12 @@ struct Config: Codable {
     var addons: [TrackedAddon] = []
     /// nil/false until the welcome flow has been completed.
     var onboarded: Bool?
+    /// How often to check for updates while the app is closed; nil = never (see BackgroundCheck).
+    var backgroundCheckHours: Int?
 
     enum CodingKeys: String, CodingKey {
-        case legacyApiKey = "apiKey", addonsPath, gameVersionTypeId, allowPrerelease, addons, onboarded
+        case legacyApiKey = "apiKey", addonsPath, gameVersionTypeId, allowPrerelease, addons, onboarded,
+             backgroundCheckHours
     }
 }
 

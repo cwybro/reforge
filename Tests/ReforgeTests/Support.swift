@@ -121,6 +121,25 @@ final class FakeInstaller: AddonInstaller {
     }
 }
 
+/// Records schedule changes instead of touching launchd.
+final class FakeScheduler: BackgroundScheduler {
+    var error: Error?
+    private(set) var calls: [Int?] = []
+    func set(hours: Int?) throws {
+        calls.append(hours)
+        if let error { throw error }
+    }
+}
+
+/// Answers the permission prompt with `allowed`; records posted notifications.
+final class FakeNotifier: UpdateNotifier {
+    var allowed = true
+    private(set) var permissionRequests = 0
+    private(set) var posts: [(title: String, body: String)] = []
+    func requestPermission() async -> Bool { permissionRequests += 1; return allowed }
+    func post(title: String, body: String) async { posts.append((title, body)) }
+}
+
 // MARK: Environment
 
 /// One test's world: a unique temp dir plus fresh fakes, wired into a Model.
@@ -131,6 +150,8 @@ final class TestEnv {
     let keys = FakeKeyStore()
     let store = MemoryConfigStore()
     let installer = FakeInstaller()
+    let scheduler = FakeScheduler()
+    let notifier = FakeNotifier()
 
     var addonsDir: URL { dir.appendingPathComponent("AddOns", isDirectory: true) }
     var importFile: URL { dir.appendingPathComponent("AddonGameInstance.json") }
@@ -158,7 +179,10 @@ final class TestEnv {
                      configStore: store,
                      installer: installer ?? self.installer,
                      curseForgeImportFile: importFile,
-                     now: { fixedNow })
+                     now: { fixedNow },
+                     chooseFolder: { _ in nil },
+                     scheduler: scheduler,
+                     notifier: notifier)
     }
 
     func makeFolder(_ name: String, marker: String = "old") throws {

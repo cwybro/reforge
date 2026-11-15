@@ -17,14 +17,15 @@ with the newest one (`scripts/pick-sdk.sh`).
 ## Validate
 
 - `make test`: unit and flow tests (Swift Testing). Fast (well under a second) and fully stubbed.
-- `make e2e`: rebuilds the app, then drives it through the Accessibility API in stub mode. Needs
+- `make e2e`: rebuilds the app, then drives it through the Accessibility API in stub mode. The app
+  runs invisibly and never takes focus, so it doesn't disrupt whatever you're doing. Needs
   Accessibility permission for the terminal or IDE that runs it. If the tests say it's missing,
   ask the user to grant it rather than skipping the suite.
 - Don't use plain `swift test`: without Xcode it fails to find the `Testing` module.
 
 Tests must stay deterministic. Use the injected fakes in `Tests/ReforgeTests/Support.swift`
 and a fresh temp folder per test. Never use the network, the real Keychain, the user's config,
-their AddOns folder, or the Trash. Don't use fixed sleeps.
+their AddOns folder, the Trash, launchd (LaunchAgents) or real notifications. Don't use fixed sleeps.
 
 ## Before every push
 

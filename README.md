@@ -22,6 +22,7 @@
 - **Adds new addons** from a CurseForge link, slug or project ID.
 - **Brings your existing setup along.** If you used the CurseForge app, Reforge reads its local list of installed addons (read-only) and picks up where it left off.
 - **Installs safely.** Old addon folders are set aside during an update and restored if anything goes wrong. Uninstalled addons go to the Trash.
+- **Can tell you when to update.** Optionally, turn on **Check for updates while Reforge is closed** in Settings. Every few hours a tiny background check (a LaunchAgent that runs, checks, and exits) sends a notification when an update is out. It never downloads anything by itself and announces each update only once. Turn it off and the LaunchAgent is removed.
 - **Stays out of the way.** It quits when you close the window and uses about 0% CPU while open.
 - **Supports Retail and Classic.** Switch game versions and opt into beta releases in Settings (⌘,).
 
@@ -49,6 +50,7 @@ Reforge uses the official [CurseForge API](https://docs.curseforge.com/), which 
 |---|---|
 | CurseForge API key | Your macOS **login Keychain**. It's never written to a file. |
 | Tracked addons and settings | `~/Library/Application Support/Reforge/config.json`, readable only by your user account |
+| Background checks (only if turned on) | `~/Library/LaunchAgents/local.reforge.update-check.plist`, plus `background-check.json` (which updates were already announced) next to `config.json` |
 
 Reforge only talks to CurseForge's API and download servers. The repository itself contains no credentials.
 
@@ -62,7 +64,7 @@ Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Ref
 | `make run` | Install, then open the app |
 | `make build` | Build `build/Reforge Dev.app` (git-ignored): a separate app (bundle ID `local.reforge.dev`) that never competes with the installed `Reforge.app` |
 | `make test` | Run the test suite: headless flow tests (Swift Testing) with the network, Keychain and your real folders stubbed out |
-| `make e2e` | Build `build/Reforge Dev.app`, then run end-to-end smoke tests that launch it in stub mode (fixture-backed CurseForge, temp settings, recorded installs: no network, Keychain or real AddOns folder) and drive it through the Accessibility API. Opt-in and not part of `make test`. Needs Accessibility permission for your terminal or IDE (System Settings → Privacy & Security → Accessibility); briefly opens app windows |
+| `make e2e` | Build `build/Reforge Dev.app`, then run end-to-end smoke tests that launch it in stub mode (fixture-backed CurseForge, temp settings, recorded installs: no network, Keychain or real AddOns folder) and drive it through the Accessibility API. Opt-in and not part of `make test`. Needs Accessibility permission for your terminal or IDE (System Settings → Privacy & Security → Accessibility); the app runs invisibly and never takes focus |
 | `make dev` | Build and open a dev copy that keeps its settings and API key in `./.dev` (git-ignored) instead of Application Support and the Keychain, so rebuilds never trigger Keychain prompts |
 | `make icon` | Redraw the app icon |
 | `make clean` | Remove build output |

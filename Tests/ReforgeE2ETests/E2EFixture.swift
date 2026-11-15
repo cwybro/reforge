@@ -69,6 +69,13 @@ final class E2EFixture {
 
     var uninstalls: [[String]] { lines("uninstalls.jsonl").compactMap { $0 as? [String] } }
 
+    /// What the stub scheduler was last told (schedule.json), nil when background checks are off.
+    var scheduledHours: Int? {
+        guard let data = try? Data(contentsOf: dir.appendingPathComponent("schedule.json")),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return obj["hours"] as? Int
+    }
+
     var savedKey: String? {
         (try? String(contentsOf: dir.appendingPathComponent("api-key"), encoding: .utf8))
     }

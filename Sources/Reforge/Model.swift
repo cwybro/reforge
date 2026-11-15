@@ -15,6 +15,8 @@ final class Model {
     var lastChecked: Date?
     /// Lives in the Keychain, never in config.json.
     var apiKey: String = ""
+    /// Shown under the background-check setting when turning it on didn't work.
+    var backgroundCheckProblem: String?
 
     // Production dependencies by default; tests inject fakes.
     private let makeAPI: (String) -> CurseForgeClient
@@ -25,6 +27,8 @@ final class Model {
     private let now: () -> Date
     /// Asks the user for a folder, starting at the given one; nil if they cancel.
     let chooseFolder: @MainActor (URL) -> URL?
+    private let scheduler: BackgroundScheduler
+    private let notifier: UpdateNotifier
 
     init(makeAPI: @escaping (String) -> CurseForgeClient = { CurseForgeAPI(apiKey: $0) },
          keyStore: KeyStore = SystemKeyStore(),
@@ -32,8 +36,12 @@ final class Model {
          installer: AddonInstaller = Installer(),
          curseForgeImportFile: URL = CurseForgeImport.file,
          now: @escaping () -> Date = Date.init,
-         chooseFolder: @escaping @MainActor (URL) -> URL? = FolderPicker.openPanel) {
+         chooseFolder: @escaping @MainActor (URL) -> URL? = FolderPicker.openPanel,
+         scheduler: BackgroundScheduler = LaunchAgentScheduler(),
+         notifier: UpdateNotifier = SystemNotifier()) {
         self.makeAPI = makeAPI
+        self.scheduler = scheduler
+        self.notifier = notifier
         self.chooseFolder = chooseFolder
         self.keyStore = keyStore
         self.configStore = configStore
@@ -98,6 +106,29 @@ final class Model {
         apiKey = key
         saveAPIKey()
         return nil
+    }
+
+    // MARK: Background checks
+
+    /// Turns checking while the app is closed on (every `hours` hours) or off (nil).
+    func setBackgroundChecks(hours: Int?) async {
+        backgroundCheckProblem = nil
+        if hours != nil, !(await notifier.requestPermission()) {
+            backgroundCheckProblem = "Reforge isn't allowed to send notifications. Turn them on in System Settings › Notifications."
+            return
+        }
+        do {
+            try scheduler.set(hours: hours)
+            config.backgroundCheckHours = hours
+            save()
+        } catch {
+            backgroundCheckProblem = "Couldn't schedule background checks: \(error.localizedDescription)"
+        }
+    }
+
+    /// Re-applies the saved schedule at launch, e.g. after the app was moved or reinstalled.
+    func syncBackgroundChecks() {
+        try? scheduler.set(hours: config.backgroundCheckHours)
     }
 
     var updatable: [TrackedAddon] { config.addons.filter { status[$0.id] == .updateAvailable } }

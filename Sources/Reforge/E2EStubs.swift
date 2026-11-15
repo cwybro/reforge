@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// End-to-end stub mode, used only by `make e2e` (Tests/ReforgeE2ETests).
@@ -16,6 +17,7 @@ import Foundation
 ///   AddonGameInstance.json    stands in for the CurseForge app's tracking file
 ///   installs.jsonl            one {"fileId", "modId", "replacing"} line per install
 ///   uninstalls.jsonl          one ["Folder", ...] line per uninstall
+///   schedule.json             {"hours": n} while background checks are on (never a real LaunchAgent)
 enum E2E {
     struct Fixture: Decodable {
         /// Keys validateKey accepts; anything else gets HTTP 403 like the real API.
@@ -27,6 +29,26 @@ enum E2E {
         var laterMods: [CFMod]?
         /// What the folder picker "chooses": a folder name inside the fixture's folder. Unset = cancel.
         var pickFolder: String?
+    }
+
+    static var isActive: Bool { !(ProcessInfo.processInfo.environment["REFORGE_E2E_FIXTURE"] ?? "").isEmpty }
+
+    /// Tests drive the app through the Accessibility API, which doesn't need it to be visible or
+    /// frontmost, so stay out of the way of whatever you're doing: no Dock icon or menu bar, and
+    /// every window fully transparent and click-through. Combined with launching it with
+    /// `activates = false`, it never takes focus. (`.prohibited` would be stricter, but AppKit
+    /// then refuses to present sheets.)
+    @MainActor
+    static func stayOutOfTheWay() {
+        NSApp.setActivationPolicy(.accessory)
+        NotificationCenter.default.addObserver(forName: NSApplication.didUpdateNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                for w in NSApp.windows where w.alphaValue != 0 {
+                    w.alphaValue = 0
+                    w.ignoresMouseEvents = true
+                }
+            }
+        }
     }
 
     /// Shared by every stub client the Model creates, so it can count update checks.
@@ -48,7 +70,9 @@ enum E2E {
                      configStore: FileConfigStore(dir: dir),
                      installer: RecordingInstaller(dir: dir),
                      curseForgeImportFile: dir.appendingPathComponent("AddonGameInstance.json"),
-                     chooseFolder: { _ in fixture.pickFolder.map { dir.appendingPathComponent($0, isDirectory: true) } })
+                     chooseFolder: { _ in fixture.pickFolder.map { dir.appendingPathComponent($0, isDirectory: true) } },
+                     scheduler: RecordingScheduler(file: dir.appendingPathComponent("schedule.json")),
+                     notifier: AllowingNotifier())
     }
 }
 
@@ -124,4 +148,19 @@ struct RecordingInstaller: AddonInstaller {
             try line.write(to: url, options: .atomic)
         }
     }
+}
+
+/// Writes the schedule to a file instead of installing a LaunchAgent.
+struct RecordingScheduler: BackgroundScheduler {
+    let file: URL
+    func set(hours: Int?) throws {
+        guard let hours else { try? FileManager.default.removeItem(at: file); return }
+        try JSONSerialization.data(withJSONObject: ["hours": hours]).write(to: file, options: .atomic)
+    }
+}
+
+/// Grants permission without the system prompt and posts nothing.
+struct AllowingNotifier: UpdateNotifier {
+    func requestPermission() async -> Bool { true }
+    func post(title: String, body: String) async {}
 }

@@ -113,6 +113,16 @@ struct SmokeTests {
 
             try await app.press("settings.prerelease")
             try await app.waitFor("beta releases saved") { fx.config["allowPrerelease"] as? Bool == true }
+
+            // The stub scheduler writes schedule.json instead of installing a LaunchAgent.
+            try await app.press("settings.backgroundCheck")
+            try await app.waitFor("background checks scheduled") {
+                fx.config["backgroundCheckHours"] as? Int == 6 && fx.scheduledHours == 6
+            }
+            try await app.press("settings.backgroundCheck")
+            try await app.waitFor("background checks turned off") {
+                fx.config["backgroundCheckHours"] == nil && fx.scheduledHours == nil
+            }
         }
     }
 
