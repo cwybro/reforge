@@ -283,6 +283,10 @@ private struct AddonRow: View {
             Button("Stop Tracking") { model.remove(addon, deleteFiles: false) }
             Button("Uninstall (Move to Trash)") { model.remove(addon, deleteFiles: true) }
         }
+        // The same commands for VoiceOver and other assistive tools (and the E2E tests), which
+        // can't rely on a context menu opening.
+        .accessibilityAction(named: "Stop Tracking") { model.remove(addon, deleteFiles: false) }
+        .accessibilityAction(named: "Uninstall (Move to Trash)") { model.remove(addon, deleteFiles: true) }
     }
 
     @ViewBuilder private var versions: some View {
@@ -371,48 +375,224 @@ private struct EmptyState: View {
     }
 }
 
+/// Search or browse CurseForge's WoW addons and install them, or paste a link / project ID.
+/// Stays open so several addons can be added in one go.
 struct AddSheet: View {
     let model: Model
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
+    @State private var search: AddonSearch
+    @FocusState private var fieldFocused: Bool
+
+    init(model: Model) {
+        self.model = model
+        _search = State(initialValue: AddonSearch(model: model))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Add an Addon")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-            Text("Paste a CurseForge link, slug, or project ID.")
-                .font(.callout)
-                .foregroundStyle(.white.opacity(0.65))
-            TextField("https://www.curseforge.com/wow/addons/…", text: $text)
-                .textFieldStyle(.plain)
-                .padding(11)
-                .background(Card())
-                .onSubmit(submit)
-                .accessibilityIdentifier("addSheet.field")
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
+                Text("Add Addons")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Done") { dismiss() }
                     .buttonStyle(QuietButtonStyle())
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("addSheet.cancel")
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.5))
+                TextField("Search addons, or paste a CurseForge link or project ID", text: $search.text)
+                    .textFieldStyle(.plain)
+                    .focused($fieldFocused)
+                    .onSubmit(submit)
+                    .accessibilityIdentifier("addSheet.field")
+            }
+            .padding(11)
+            .background(Card())
+            HStack(spacing: 10) {
+                Picker("Sort", selection: $search.sort) {
+                    ForEach(SearchSort.allCases) { Text($0.title).tag($0) }
+                }
+                .fixedSize()
+                .accessibilityIdentifier("search.sort")
+                Picker("Category", selection: $search.categoryId) {
+                    Text("All categories").tag(Int?.none)
+                    ForEach(search.categories) { Text($0.name).tag(Int?.some($0.id)) }
+                }
+                .fixedSize()
+                .accessibilityIdentifier("search.category")
+                Spacer()
+                if search.loading { ProgressView().controlSize(.small) }
+                if search.total > 0 {
+                    Text(search.total >= AddonSearch.maxResults ? "\(AddonSearch.maxResults.formatted())+ addons"
+                                                                : "\(search.total.formatted()) addons")
+                        .font(.caption).foregroundStyle(.white.opacity(0.5))
+                        .accessibilityIdentifier("search.total")
+                }
+            }
+            .labelsHidden()
+            .disabled(search.directInput != nil)
+            results
+        }
+        .padding(24)
+        .frame(width: 620, height: 580)
+        .background(AppBackground())
+        .preferredColorScheme(.dark)
+        .onAppear { fieldFocused = true }
+        .task { await search.loadCategories() }
+        // Re-search whenever the text, sort or category changes; the pause lets typing settle
+        // (a newer change cancels this task before it fires).
+        .task(id: search.query) {
+            if !search.results.isEmpty || !search.query.text.isEmpty {
+                try? await Task.sleep(for: .milliseconds(300))
+                if Task.isCancelled { return }
+            }
+            await search.run()
+        }
+    }
+
+    @ViewBuilder private var results: some View {
+        if let direct = search.directInput {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Install from link or ID").font(.system(size: 13, weight: .semibold, design: .rounded))
+                    Text(direct).font(.caption).foregroundStyle(.white.opacity(0.55)).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer()
                 Button("Install", action: submit)
                     .buttonStyle(GlowButtonStyle(compact: true))
                     .keyboardShortcut(.defaultAction)
-                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                     .accessibilityIdentifier("addSheet.install")
             }
+            .padding(12)
+            .background(Card())
+            Spacer()
+        } else if let error = search.error {
+            VStack(spacing: 10) {
+                Text(error).foregroundStyle(.orange).multilineTextAlignment(.center)
+                Button("Try Again") { Task { await search.run() } }.buttonStyle(QuietButtonStyle())
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("search.error")
+        } else if search.results.isEmpty {
+            Group {
+                if search.loading {
+                    ProgressView()
+                } else {
+                    Text(search.query.text.isEmpty ? "No addons found." : "No addons match “\(search.query.text)”.")
+                        .foregroundStyle(.white.opacity(0.55))
+                        .accessibilityIdentifier("search.empty")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(search.results, id: \.id) { mod in
+                        SearchResultRow(mod: mod, search: search)
+                            .onAppear {
+                                // Infinite scroll: fetch the next page as the last row comes into view.
+                                if mod.id == search.results.last?.id { Task { await search.loadMore() } }
+                            }
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+            .accessibilityIdentifier("search.results")
         }
-        .padding(24)
-        .frame(width: 460)
-        .background(AppBackground())
-        .preferredColorScheme(.dark)
     }
 
+    /// Return: install a pasted link / ID (closing the sheet), or the top result.
     private func submit() {
-        let input = text
-        dismiss()
-        Task { await model.add(input) }
+        if let input = search.directInput {
+            dismiss()
+            Task { await model.add(input) }
+        } else if let first = search.results.first, !search.isInstalled(first.id) {
+            Task { await search.install(first) }
+        }
+    }
+}
+
+private struct SearchResultRow: View {
+    let mod: CFMod
+    let search: AddonSearch
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AsyncImage(url: mod.logo?.thumbnailUrl.flatMap(URL.init(string:))) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                ZStack {
+                    Color.white.opacity(0.08)
+                    Image(systemName: "puzzlepiece.extension").foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(mod.name)
+                        .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    if let author = mod.authors?.first?.name {
+                        Text("by \(author)").font(.system(size: 11)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                    }
+                    if let site = mod.links?.websiteUrl.flatMap(URL.init(string:)) {
+                        Link(destination: site) { Image(systemName: "arrow.up.right.square") }
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .help("Open on CurseForge")
+                    }
+                }
+                if let summary = mod.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !details.isEmpty {
+                    Text(details).font(.system(size: 11)).foregroundStyle(.white.opacity(0.42)).lineLimit(1)
+                }
+                if let failure = search.failures[mod.id] {
+                    Text(failure).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)
+                        .accessibilityIdentifier("search.result.\(mod.id).failure")
+                }
+            }
+            Spacer(minLength: 8)
+            installControl.frame(minWidth: 84, alignment: .trailing)
+        }
+        .padding(10)
+        .background(Card())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("search.result.\(mod.id)")
+    }
+
+    /// "12M downloads · Updated Mar 3, 2026 · Bags & Inventory"
+    private var details: String {
+        var parts: [String] = []
+        if let d = mod.downloadCount { parts.append("\(Int(d).formatted(.number.notation(.compactName))) downloads") }
+        if let date = mod.dateModified { parts.append("Updated \(date.formatted(date: .abbreviated, time: .omitted))") }
+        if let category = mod.categories?.first?.name { parts.append(category) }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder private var installControl: some View {
+        if search.isInstalled(mod.id) {
+            Label("Installed", systemImage: "checkmark")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.cyan)
+                .accessibilityIdentifier("search.result.\(mod.id).installed")
+        } else if search.installing.contains(mod.id) {
+            ProgressView().controlSize(.small)
+        } else {
+            Button("Install") { Task { await search.install(mod) } }
+                .buttonStyle(GlowButtonStyle(compact: true))
+                .accessibilityIdentifier("search.result.\(mod.id).install")
+        }
     }
 }
 

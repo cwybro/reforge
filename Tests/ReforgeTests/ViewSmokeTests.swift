@@ -57,7 +57,7 @@ struct ViewSmokeTests {
 
     @Test func addSheet() throws {
         let env = try TestEnv(key: "$2a$10$k")
-        render(AddSheet(model: env.makeModel()), width: 460, height: 200)
+        render(AddSheet(model: env.makeModel()), width: 620, height: 580)
         render(KeyBanner(model: env.makeModel()), width: 600, height: 100)
     }
 }

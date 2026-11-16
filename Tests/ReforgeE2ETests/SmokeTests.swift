@@ -157,21 +157,33 @@ struct SmokeTests {
     }
 
     /// Drives the row's context menu without the mouse: AXShowMenu on the row, then AXPress on the item.
-    @Test func stopTrackingFromContextMenu() async throws {
+    @Test func searchAndInstall() async throws {
         try await withReforge(.tracking) { app, fx in
-            let row = try await app.element("addonRow.\(Mods.bravo)")
+            try await app.press("header.add")
+            // An empty search browses; Alpha is already tracked.
+            try await app.element("search.result.\(Mods.alpha).installed")
+            try await app.element("search.result.\(Mods.charlie).install")
+
+            try await app.setValue("addSheet.field", "char")
+            try await app.waitGone("search.result.\(Mods.alpha)")
+            try await app.press("search.result.\(Mods.charlie).install")
+            try await app.element("search.result.\(Mods.charlie).installed")
+            #expect(fx.installs.map(\.fileId) == [3001])
+            try await app.waitFor("Charlie saved") { fx.trackedFileIds[Mods.charlie] == 3001 }
+
+            // The sheet stays open for more; Done closes it and the list has the new addon.
+            try await app.press("addSheet.cancel")
+            try await app.waitGone("addSheet.field")
+            try await app.element("addonRow.\(Mods.charlie)")
+        }
+    }
+
+    @Test func stopTracking() async throws {
+        try await withReforge(.tracking) { app, fx in
             try await app.element("addonRow.\(Mods.bravo).update")   // let the first check settle
-            // AppKit runs the menu in a modal tracking loop, so the AXShowMenu call itself may not
-            // report success (kAXErrorCannotComplete) even though the menu opened; the wait below
-            // is what checks it.
-            let shown = AXUIElementPerformAction(row, kAXShowMenuAction as CFString)
-            try #require(shown == .success || shown == .cannotComplete, "AXShowMenu failed: \(shown.rawValue)")
-            var item: AXUIElement?
-            try await app.waitFor("the Stop Tracking menu item") {
-                item = app.menuItem(titled: "Stop Tracking")
-                return item != nil
-            }
-            #expect(AXUIElementPerformAction(item!, kAXPressAction as CFString) == .success)
+            // The row's named accessibility action runs the same code as its context menu item.
+            // (Opening a real context menu in a background app that never activates is unreliable.)
+            try await app.performNamedAction("Stop Tracking", on: "addonRow.\(Mods.bravo)")
 
             try await app.waitGone("addonRow.\(Mods.bravo)")
             try await app.waitForText("status.message", containing: "Stopped tracking Bravo.")

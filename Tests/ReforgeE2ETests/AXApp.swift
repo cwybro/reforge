@@ -111,19 +111,18 @@ final class AXApp {
         try #require(err == .success, "AXPress on \(menu) → \(title) failed: \(err.rawValue)", sourceLocation: sourceLocation)
     }
 
-    /// An item in an open context menu. SwiftUI attaches the menu to the window as an AXMenu
-    /// (tagged with the row's identifier), not to the application element.
-    func menuItem(titled title: String) -> AXUIElement? {
-        func search(_ el: AXUIElement, inMenu: Bool, depth: Int) -> AXUIElement? {
-            let role = el.string(kAXRoleAttribute)
-            if inMenu, role == kAXMenuItemRole, el.string(kAXTitleAttribute) == title { return el }
-            guard depth < 80, role != kAXMenuBarRole else { return nil }
-            for c in el.children(kAXChildrenAttribute) {
-                if let hit = search(c, inMenu: inMenu || role == kAXMenuRole, depth: depth + 1) { return hit }
-            }
-            return nil
-        }
-        return search(root, inMenu: false, depth: 0)
+    /// Performs a SwiftUI `.accessibilityAction(named:)` on an element. AX lists those as
+    /// "Name:<name>\nTarget:…" action strings, so match on the name line.
+    func performNamedAction(_ name: String, on id: String,
+                            sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let el = try await element(id, sourceLocation: sourceLocation)
+        var names: CFArray?
+        AXUIElementCopyActionNames(el, &names)
+        let all = (names as? [String]) ?? []
+        let action = try #require(all.first { $0 == name || $0.hasPrefix("Name:\(name)\n") || $0.hasPrefix("Name:\(name)") },
+                                  "\(id) has no action named \(name); it has \(all)", sourceLocation: sourceLocation)
+        let err = AXUIElementPerformAction(el, action as CFString)
+        try #require(err == .success, "\(name) on \(id) failed: \(err.rawValue)", sourceLocation: sourceLocation)
     }
 
     /// All text in an element and its descendants (AXValue, AXTitle, AXDescription), joined.

@@ -204,8 +204,8 @@ final class Model {
         let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return }
         message = "Looking up \(s)…"
+        let mod: CFMod
         do {
-            let mod: CFMod
             if let id = Int(s) {
                 mod = try await api.mod(id)
             } else {
@@ -215,6 +215,16 @@ final class Model {
                 guard let m = try await api.mod(slug: slug) else { throw CFError.notFound(s) }
                 mod = m
             }
+        } catch {
+            message = error.localizedDescription
+            return
+        }
+        await install(mod)
+    }
+
+    /// Installs the newest file of `mod` for the current game version and starts tracking it.
+    func install(_ mod: CFMod) async {
+        do {
             if config.addons.contains(where: { $0.id == mod.id }) { message = "\(mod.name) is already tracked."; return }
             guard let fid = mod.latestFileId(gameVersionTypeId: config.gameVersionTypeId,
                                              allowPrerelease: config.allowPrerelease),

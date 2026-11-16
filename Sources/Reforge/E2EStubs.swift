@@ -11,7 +11,8 @@ import Foundation
 ///
 /// Files in the fixture's folder:
 ///   fixture.json              {"validKeys": [...], "mods": [CFMod...], "files": [CFFile...],
-///                              "laterMods": [CFMod...]?, "pickFolder": "name"?}
+///                              "laterMods": [CFMod...]?, "pickFolder": "name"?, "categories": [...]?}
+///                             Search matches mod names containing the text, sorted by name.
 ///   config.json               settings (seed it, or leave it out for a fresh install)
 ///   api-key                   the saved key
 ///   AddonGameInstance.json    stands in for the CurseForge app's tracking file
@@ -29,6 +30,8 @@ enum E2E {
         var laterMods: [CFMod]?
         /// What the folder picker "chooses": a folder name inside the fixture's folder. Unset = cancel.
         var pickFolder: String?
+        /// Addon categories for the Add sheet's menu.
+        var categories: [CFCategory]?
     }
 
     static var isActive: Bool { !(ProcessInfo.processInfo.environment["REFORGE_E2E_FIXTURE"] ?? "").isEmpty }
@@ -109,6 +112,17 @@ struct StubCurseForge: CurseForgeClient {
     func mod(slug: String) async throws -> CFMod? {
         try authorize()
         return fixture.mods.first { $0.slug == slug }
+    }
+    func search(_ q: SearchQuery) async throws -> (mods: [CFMod], total: Int) {
+        try authorize()
+        let all = fixture.mods
+            .filter { q.text.isEmpty || $0.name.localizedCaseInsensitiveContains(q.text) }
+            .sorted { $0.name < $1.name }
+        return (Array(all.dropFirst(q.index).prefix(q.pageSize)), all.count)
+    }
+    func categories() async throws -> [CFCategory] {
+        try authorize()
+        return fixture.categories ?? []
     }
 }
 

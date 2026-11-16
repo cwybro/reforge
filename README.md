@@ -19,7 +19,7 @@
 ## ✨ What it does
 
 - **Checks for updates in one click.** It checks CurseForge when it opens (or press ⌘R). Install updates one at a time or all at once.
-- **Adds new addons** from a CurseForge link, slug or project ID.
+- **Finds new addons.** Search CurseForge by name or author, or browse what's popular or recently updated, filtered by category and your game version, and install with one click. A pasted CurseForge link or project ID works too.
 - **Brings your existing setup along.** If you used the CurseForge app, Reforge reads its local list of installed addons (read-only) and picks up where it left off.
 - **Installs safely.** Old addon folders are set aside during an update and restored if anything goes wrong. Uninstalled addons go to the Trash.
 - **Can tell you when to update.** Optionally, turn on **Check for updates while Reforge is closed** in Settings. Every few hours a tiny background check (a LaunchAgent that runs, checks, and exits) sends a notification when an update is out. It never downloads anything by itself and announces each update only once. Turn it off and the LaunchAgent is removed.

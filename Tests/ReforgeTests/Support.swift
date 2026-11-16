@@ -76,6 +76,28 @@ final class FakeCurseForge: CurseForgeClient {
         if let error { throw error }
         return modsById.values.sorted { $0.id < $1.id }.first { $0.slug == slug }
     }
+
+    var categoryList: [CFCategory] = []
+    private(set) var searches: [SearchQuery] = []
+    /// Lets a test hold a search mid-flight (to check that stale responses are dropped).
+    var searchGate: (() async -> Void)?
+
+    /// Name contains the text (case-insensitive), sorted by id, paged by index/pageSize.
+    func search(_ q: SearchQuery) async throws -> (mods: [CFMod], total: Int) {
+        try call("search(\(q.text))")
+        searches.append(q)
+        if let gate = searchGate { await gate() }
+        if let error { throw error }
+        let all = modsById.values.sorted { $0.id < $1.id }
+            .filter { q.text.isEmpty || $0.name.localizedCaseInsensitiveContains(q.text) }
+        return (Array(all.dropFirst(q.index).prefix(q.pageSize)), all.count)
+    }
+
+    func categories() async throws -> [CFCategory] {
+        try call("categories")
+        if let error { throw error }
+        return categoryList
+    }
 }
 
 final class FakeKeyStore: KeyStore {
