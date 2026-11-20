@@ -98,6 +98,14 @@ final class FakeCurseForge: CurseForgeClient {
         if let error { throw error }
         return categoryList
     }
+
+    /// Fingerprint -> (project id, file) that fingerprintMatches recognises.
+    var fingerprintFiles: [UInt32: (mod: Int, file: CFFile)] = [:]
+    func fingerprintMatches(_ fingerprints: [UInt32]) async throws -> [CFFingerprintMatch] {
+        try call("fingerprintMatches(\(fingerprints.count))")
+        if let error { throw error }
+        return fingerprints.compactMap { fingerprintFiles[$0] }.map { CFFingerprintMatch(id: $0.mod, file: $0.file) }
+    }
 }
 
 final class FakeKeyStore: KeyStore {

@@ -32,6 +32,8 @@ enum E2E {
         var pickFolder: String?
         /// Addon categories for the Add sheet's menu.
         var categories: [CFCategory]?
+        /// Files the fingerprint lookup recognises (by their modules' fingerprints).
+        var fingerprintMatches: [CFFingerprintMatch]?
     }
 
     static var isActive: Bool { !(ProcessInfo.processInfo.environment["REFORGE_E2E_FIXTURE"] ?? "").isEmpty }
@@ -123,6 +125,12 @@ struct StubCurseForge: CurseForgeClient {
     func categories() async throws -> [CFCategory] {
         try authorize()
         return fixture.categories ?? []
+    }
+    func fingerprintMatches(_ fingerprints: [UInt32]) async throws -> [CFFingerprintMatch] {
+        try authorize()
+        return (fixture.fingerprintMatches ?? []).filter { m in
+            (m.file.modules ?? []).contains { $0.fingerprint.map { fingerprints.contains(UInt32($0)) } ?? false }
+        }
     }
 }
 

@@ -4,7 +4,11 @@ import Foundation
 // Requires a free API key from https://console.curseforge.com.
 
 struct CFFile: Decodable {
-    struct Module: Decodable { let name: String }
+    struct Module: Decodable {
+        let name: String
+        /// CurseForge's fingerprint of this folder (see Fingerprint.folder).
+        var fingerprint: Int? = nil
+    }
     let id: Int
     let modId: Int
     let displayName: String
@@ -51,6 +55,13 @@ struct CFMod: Decodable {
             .map(\.fileId)
             .max()
     }
+}
+
+/// A file CurseForge recognised from an installed folder's fingerprint.
+struct CFFingerprintMatch: Decodable {
+    /// The project (mod) id.
+    let id: Int
+    let file: CFFile
 }
 
 /// An addon category (Bags & Inventory, Boss Encounters, …).
@@ -108,6 +119,8 @@ protocol CurseForgeClient {
     func search(_ query: SearchQuery) async throws -> (mods: [CFMod], total: Int)
     /// WoW addon categories.
     func categories() async throws -> [CFCategory]
+    /// The CurseForge files whose folders have exactly these fingerprints.
+    func fingerprintMatches(_ fingerprints: [UInt32]) async throws -> [CFFingerprintMatch]
 }
 
 struct CurseForgeAPI: CurseForgeClient {
@@ -191,5 +204,11 @@ struct CurseForgeAPI: CurseForgeClient {
 
     func categories() async throws -> [CFCategory] {
         try await request("/v1/categories", query: [.init(name: "gameId", value: "1"), .init(name: "classId", value: "1")])
+    }
+
+    func fingerprintMatches(_ fingerprints: [UInt32]) async throws -> [CFFingerprintMatch] {
+        struct Result: Decodable { let exactMatches: [CFFingerprintMatch] }
+        let result: Result = try await request("/v1/fingerprints/1", body: ["fingerprints": fingerprints.map(Int.init)])
+        return result.exactMatches
     }
 }

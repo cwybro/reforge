@@ -35,6 +35,10 @@ struct ViewSmokeTests {
         model.latest[2] = cfFile(250, mod: 2, "Bravo 2.5")
         model.message = "1 update available."
         render(ContentView(model: model))
+        model.found = [FoundAddon(folders: ["Echo", "Echo_Options"], title: "Echo", version: "Echo 1.2", projectId: 42,
+                                  file: cfFile(4200, mod: 42, "Echo 1.2")),
+                       FoundAddon(folders: ["Mine"], title: "Mine", version: "1.0", author: "You")]
+        render(ContentView(model: model))
     }
 
     @Test func onboardingSteps() throws {

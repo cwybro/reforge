@@ -15,6 +15,9 @@ final class Model {
     var lastChecked: Date?
     /// Lives in the Keychain, never in config.json.
     var apiKey: String = ""
+    /// Addons in the AddOns folder that Reforge doesn't track (see scanAddonsFolder).
+    var found: [FoundAddon] = []
+    private var scanning = false
     /// Shown under the background-check setting when turning it on didn't work.
     var backgroundCheckProblem: String?
 
@@ -173,6 +176,85 @@ final class Model {
         }
     }
 
+    /// Checks for updates, then looks for untracked addons in the AddOns folder.
+    func refresh() async {
+        await checkForUpdates()
+        await scanAddonsFolder()
+    }
+
+    // MARK: Untracked addons
+
+    /// Finds addon folders Reforge doesn't track and asks CurseForge which ones it knows, by
+    /// folder fingerprint and by the `.toc`'s X-Curse-Project-ID. Without a key, or if CurseForge
+    /// can't be reached, they're all listed as local.
+    func scanAddonsFolder() async {
+        guard !scanning else { return }
+        scanning = true
+        defer { scanning = false }
+        let dir = addonsDir
+        let skip = Set(config.addons.flatMap(\.folders))
+        let folders = await Task.detached(priority: .utility) { LocalScanner.scan(addonsDir: dir, skipping: skip) }.value
+        var matches: [CFFingerprintMatch] = []
+        var mods: [Int: CFMod] = [:]
+        if hasKey, !folders.isEmpty {
+            do {
+                matches = try await api.fingerprintMatches(folders.map(\.fingerprint))
+                let ids = Set(matches.map(\.id)).union(folders.compactMap(\.toc.curseProjectId))
+                if !ids.isEmpty { for m in try await api.mods(ids.sorted()) { mods[m.id] = m } }
+            } catch {
+                matches = []; mods = [:]
+            }
+        }
+        // Something may have been tracked while this ran.
+        let tracked = Set(config.addons.flatMap(\.folders).map { $0.lowercased() })
+        found = Discovery.group(folders.filter { !tracked.contains($0.name.lowercased()) }, matches: matches, mods: mods)
+    }
+
+    /// Starts tracking an addon found on CurseForge. Nothing is downloaded: when the exact file
+    /// is known it's recorded as installed, otherwise the update check offers the latest file.
+    func track(_ addon: FoundAddon) async {
+        guard addon.projectId != nil else { return }
+        startTracking(addon)
+        await checkForUpdates()
+        message = "Now tracking \(addon.title)."
+    }
+
+    func trackAllFound() async {
+        let list = found.filter { !$0.isLocal }
+        guard !list.isEmpty else { return }
+        list.forEach(startTracking)
+        await checkForUpdates()
+        message = "Now tracking \(list.count) addon\(list.count == 1 ? "" : "s")."
+    }
+
+    private func startTracking(_ addon: FoundAddon) {
+        guard let pid = addon.projectId else { return }
+        let moduleFolders = addon.file?.modules?.map(\.name) ?? []
+        let folders = moduleFolders.isEmpty ? addon.folders : moduleFolders
+        if let i = config.addons.firstIndex(where: { $0.id == pid }) {
+            // Already tracked: these are extra folders of the same addon.
+            config.addons[i].folders += folders.filter { !config.addons[i].folders.contains($0) }
+        } else {
+            config.addons.append(TrackedAddon(id: pid, name: addon.title, fileId: addon.file?.id ?? 0,
+                                              version: addon.file?.displayName ?? addon.version ?? "Unknown version",
+                                              fileDate: addon.file?.fileDate, folders: folders,
+                                              websiteURL: addon.websiteURL))
+        }
+        sort(); save()
+        found.removeAll { $0.id == addon.id }
+    }
+
+    /// Moves a found addon's folders to the Trash.
+    func trash(_ addon: FoundAddon) {
+        do {
+            try installer.uninstall(folders: addon.folders, addonsDir: addonsDir)
+            found.removeAll { $0.id == addon.id }
+            message = "Moved \(addon.title) to the Trash."
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
     func update(_ addon: TrackedAddon) async {
         guard let file = latest[addon.id] else { return }
         status[addon.id] = .working
@@ -243,6 +325,12 @@ final class Model {
         } catch {
             message = error.localizedDescription
         }
+    }
+
+    /// Stops tracking without touching its files, then rescans so it shows up under Not tracked.
+    func stopTracking(_ addon: TrackedAddon) async {
+        remove(addon, deleteFiles: false)
+        await scanAddonsFolder()
     }
 
     func remove(_ addon: TrackedAddon, deleteFiles: Bool) {

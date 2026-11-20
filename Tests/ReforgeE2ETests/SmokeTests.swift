@@ -7,9 +7,16 @@ import Testing
 // app that runs them (terminal or IDE).
 
 /// Launches Reforge on a fresh fixture, runs `body`, and always quits the app afterwards.
+/// `addonFiles` (path -> contents) are written into the fixture's AddOns folder before launch.
 func withReforge(_ start: E2EFixture.Start, edit: (inout [String: Any]) -> Void = { _ in },
+                 addonFiles: [String: String] = [:],
                  _ body: (AXApp, E2EFixture) async throws -> Void) async throws {
     let fixture = try E2EFixture(start, edit: edit)
+    for (path, contents) in addonFiles {
+        let url = fixture.addonsDir.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(contents.utf8).write(to: url)
+    }
     let app = try await AXApp.launch(fixture: fixture.fixtureFile)
     defer { app.terminate() }
     try await body(app, fixture)
@@ -178,8 +185,43 @@ struct SmokeTests {
         }
     }
 
+    @Test func foundAddons() async throws {
+        let files = [
+            // On CurseForge (project id in its .toc), but not tracked.
+            "Charlie/Charlie.toc": "## Interface: 110000\n## Title: Charlie\n## Version: 3.0\n## X-Curse-Project-ID: \(Mods.charlie)\nCharlie.lua\n",
+            "Charlie/Charlie.lua": "print('charlie')",
+            // Homemade, with a helper folder.
+            "Homebrew/Homebrew.toc": "## Interface: 110000\n## Title: Homebrew\n## Author: You\nHomebrew.lua\n",
+            "Homebrew/Homebrew.lua": "print('home')",
+            "Homebrew_Config/Homebrew_Config.toc": "## Interface: 110000\nconfig.lua\n",
+            "Homebrew_Config/config.lua": "print('config')",
+        ]
+        try await withReforge(.tracking, addonFiles: files) { app, fx in
+            try await app.element("found.Homebrew.local")
+            try await app.waitForText("found.Homebrew", containing: "Homebrew, Homebrew_Config")
+            try await app.waitForText("status.count", containing: "2 addons · 2 not tracked")
+
+            try await app.press("found.Charlie.track")
+            try await app.waitGone("found.Charlie")
+            try await app.element("addonRow.\(Mods.charlie)")
+            try await app.waitForText("status.message", containing: "Now tracking Charlie.")
+            try await app.waitFor("Charlie tracked without downloading") {
+                fx.trackedFileIds[Mods.charlie] == 0 && fx.installs.isEmpty
+            }
+            // Its installed version is unknown, so the latest file is offered as an update.
+            try await app.element("addonRow.\(Mods.charlie).update")
+
+            try await app.performNamedAction("Move to Trash", on: "found.Homebrew")
+            try await app.waitGone("found.Homebrew")
+            try await app.waitFor("both Homebrew folders trashed") { fx.uninstalls == [["Homebrew", "Homebrew_Config"]] }
+        }
+    }
+
     @Test func stopTracking() async throws {
-        try await withReforge(.tracking) { app, fx in
+        // Bravo's folder is on disk, so once untracked it's listed under Not tracked straight away.
+        let bravo = ["Bravo/Bravo.toc": "## Interface: 110000\n## Title: Bravo\n## X-Curse-Project-ID: \(Mods.bravo)\nBravo.lua\n",
+                     "Bravo/Bravo.lua": "print('bravo')"]
+        try await withReforge(.tracking, addonFiles: bravo) { app, fx in
             try await app.element("addonRow.\(Mods.bravo).update")   // let the first check settle
             // The row's named accessibility action runs the same code as its context menu item.
             // (Opening a real context menu in a background app that never activates is unreliable.)
@@ -189,6 +231,8 @@ struct SmokeTests {
             try await app.waitForText("status.message", containing: "Stopped tracking Bravo.")
             try await app.waitFor("Bravo removed from config") { fx.trackedFileIds[Mods.bravo] == nil }
             #expect(fx.uninstalls.isEmpty)
+            try await app.element("found.Bravo.track")
+            try await app.waitForText("status.count", containing: "1 addon · 1 not tracked")
         }
     }
 }

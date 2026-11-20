@@ -40,7 +40,7 @@ struct ReforgeApp: App {
                 Button("Show Welcome Screen") { withAnimation(.easeInOut(duration: 0.5)) { model.showOnboardingAgain() } }
             }
             CommandGroup(after: .newItem) {
-                Button("Check for Updates") { Task { await model.checkForUpdates() } }
+                Button("Check for Updates") { Task { await model.refresh() } }
                     .keyboardShortcut("r")
             }
         }
@@ -145,7 +145,7 @@ struct ContentView: View {
                 if !model.hasKey {
                     KeyBanner(model: model).padding(.horizontal, 20).padding(.bottom, 12)
                 }
-                if model.config.addons.isEmpty {
+                if model.config.addons.isEmpty && model.found.isEmpty {
                     EmptyState().frame(maxHeight: .infinity)
                         .accessibilityIdentifier("main.empty")
                 } else {
@@ -153,6 +153,12 @@ struct ContentView: View {
                         LazyVStack(spacing: 8) {
                             ForEach(model.config.addons) { addon in
                                 AddonRow(addon: addon, model: model)
+                            }
+                            if !model.found.isEmpty {
+                                FoundHeader(model: model)
+                                ForEach(model.found) { addon in
+                                    FoundRow(addon: addon, model: model)
+                                }
                             }
                         }
                         .padding(.horizontal, 20)
@@ -166,7 +172,7 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .sheet(isPresented: $showingAdd) { AddSheet(model: model) }
-        .task { await model.checkForUpdates() }
+        .task { await model.refresh() }
     }
 }
 
@@ -204,7 +210,7 @@ private struct Header: View {
                 .help("Add an addon")
                 .disabled(!model.hasKey)
                 .accessibilityIdentifier("header.add")
-            Button { Task { await model.checkForUpdates() } } label: {
+            Button { Task { await model.refresh() } } label: {
                 Image(systemName: "arrow.clockwise")
                     .rotationEffect(.degrees(model.checking ? 360 : 0))
                     .animation(model.checking ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default,
@@ -280,12 +286,12 @@ private struct AddonRow: View {
                 NSWorkspace.shared.activateFileViewerSelecting(addon.folders.map { model.addonsDir.appendingPathComponent($0) })
             }
             Divider()
-            Button("Stop Tracking") { model.remove(addon, deleteFiles: false) }
+            Button("Stop Tracking") { Task { await model.stopTracking(addon) } }
             Button("Uninstall (Move to Trash)") { model.remove(addon, deleteFiles: true) }
         }
         // The same commands for VoiceOver and other assistive tools (and the E2E tests), which
         // can't rely on a context menu opening.
-        .accessibilityAction(named: "Stop Tracking") { model.remove(addon, deleteFiles: false) }
+        .accessibilityAction(named: "Stop Tracking") { Task { await model.stopTracking(addon) } }
         .accessibilityAction(named: "Uninstall (Move to Trash)") { model.remove(addon, deleteFiles: true) }
     }
 
@@ -350,7 +356,8 @@ private struct StatusBar: View {
                 .lineLimit(1)
                 .accessibilityIdentifier("status.message")
             Spacer()
-            Text("\(model.config.addons.count) addon\(model.config.addons.count == 1 ? "" : "s")")
+            Text("\(model.config.addons.count) addon\(model.config.addons.count == 1 ? "" : "s")"
+                 + (model.found.isEmpty ? "" : " · \(model.found.count) not tracked"))
                 .accessibilityIdentifier("status.count")
         }
         .font(.system(size: 12, design: .rounded))
@@ -359,6 +366,105 @@ private struct StatusBar: View {
         .padding(.vertical, 9)
         .background(.black.opacity(0.22))
         .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
+    }
+}
+
+/// "Not tracked" divider above addons found in the AddOns folder, with Track All.
+private struct FoundHeader: View {
+    let model: Model
+
+    var body: some View {
+        let known = model.found.filter { !$0.isLocal }.count
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not tracked")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(known > 0 ? "Found in your AddOns folder. Track the CurseForge ones to keep them updated."
+                               : "Found in your AddOns folder. These aren't on CurseForge, so Reforge can't update them.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            Spacer()
+            if known > 1 {
+                Button("Track All (\(known))") { Task { await model.trackAllFound() } }
+                    .buttonStyle(QuietButtonStyle(tint: Theme.cyan))
+                    .accessibilityIdentifier("found.trackAll")
+            }
+        }
+        .padding(.top, 14)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("found.header")
+    }
+}
+
+/// An untracked addon: CurseForge ones can be tracked; local ones are just listed.
+private struct FoundRow: View {
+    let addon: FoundAddon
+    let model: Model
+
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(addon.title)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.85))
+                    if let author = addon.author, addon.isLocal {
+                        Text("by \(author)").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                    }
+                }
+                Text(addon.folders.joined(separator: ", "))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 12)
+            if let version = addon.version {
+                Text(version)
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: 280, alignment: .trailing)
+            }
+            Group {
+                if addon.isLocal {
+                    Text("Local")
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().strokeBorder(.white.opacity(0.2)))
+                        .help("Not from CurseForge, so Reforge can't update it.")
+                        .accessibilityIdentifier("found.\(addon.id).local")
+                } else {
+                    Button("Track") { Task { await model.track(addon) } }
+                        .buttonStyle(GlowButtonStyle(compact: true))
+                        .help(addon.file == nil ? "Track this CurseForge addon. Its installed version isn't known, so it will be offered as an update."
+                                                : "Track this CurseForge addon (\(addon.file!.displayName) is installed).")
+                        .accessibilityIdentifier("found.\(addon.id).track")
+                }
+            }
+            .frame(width: 104, alignment: .trailing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("found.\(addon.id)")
+        .contextMenu {
+            if let s = addon.websiteURL, let u = URL(string: s) {
+                Button("Open on CurseForge") { NSWorkspace.shared.open(u) }
+            }
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting(addon.folders.map { model.addonsDir.appendingPathComponent($0) })
+            }
+            Divider()
+            Button("Move to Trash") { model.trash(addon) }
+        }
+        // The same command for assistive tools (and the E2E tests); must follow the element above.
+        .accessibilityAction(named: "Move to Trash") { model.trash(addon) }
     }
 }
 
@@ -621,7 +727,7 @@ struct KeyBanner: View {
                     if let err = await model.verifyAndSaveKey(key.trimmingCharacters(in: .whitespacesAndNewlines)) {
                         model.message = err
                     } else {
-                        await model.checkForUpdates()
+                        await model.refresh()
                     }
                 }
             }
