@@ -41,6 +41,12 @@ That builds the app and installs it as `/Applications/Reforge.app`. Run `make in
 
 On first launch, a short welcome flow walks you through choosing your AddOns folder, connecting to CurseForge and importing your addons. You can reopen it anytime from **Reforge → Show Welcome Screen**.
 
+### Updates
+
+Every change merged to `main` is built by GitHub Actions and published as a [release](https://github.com/cwybro/reforge/releases) (version `1.0.<build>`). When a newer one is out, Reforge shows a banner when it opens. **Install & Relaunch** downloads it, checks it and replaces the app in place. You can turn the check off in Settings, or run it anytime from **Reforge → Check for Reforge Updates…**.
+
+Releases are signed ad-hoc rather than notarized by Apple. Updates installed by Reforge open normally. If you download `Reforge.zip` from the releases page in a browser instead, macOS will block it the first time: open **System Settings → Privacy & Security** and choose **Open Anyway**. After an update, macOS may ask once more whether Reforge can use its Keychain item (**Always Allow**).
+
 ### CurseForge API key
 
 Reforge uses the official [CurseForge API](https://docs.curseforge.com/), which needs a free key for third-party tools. A working key looks like `$2a$10$…`. Keys starting with `cfc_` are a different kind and won't work.

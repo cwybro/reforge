@@ -69,6 +69,9 @@ final class E2EFixture {
 
     var uninstalls: [[String]] { lines("uninstalls.jsonl").compactMap { $0 as? [String] } }
 
+    /// Lines of app-update.jsonl: what the stub app updater installed, then whether it relaunched.
+    var appUpdateLog: [[String: Any]] { lines("app-update.jsonl").compactMap { $0 as? [String: Any] } }
+
     /// What the stub scheduler was last told (schedule.json), nil when background checks are off.
     var scheduledHours: Int? {
         guard let data = try? Data(contentsOf: dir.appendingPathComponent("schedule.json")),

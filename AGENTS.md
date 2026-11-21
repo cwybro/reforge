@@ -28,6 +28,13 @@ Tests must stay deterministic. Use the injected fakes in `Tests/ReforgeTests/Sup
 and a fresh temp folder per test. Never use the network, the real Keychain, the user's config,
 their AddOns folder, the Trash, launchd (LaunchAgents) or real notifications. Don't use fixed sleeps.
 
+## Releases
+
+Every push to `main` runs `.github/workflows/release.yml`: unit tests, a release build, and a GitHub
+release `v1.0.<commit count>` with `Reforge.zip`, which the app's updater installs
+(`Sources/Reforge/AppUpdate.swift`). So a push to main ships to users. `build.sh` stamps the same
+version locally, so a local build of a commit matches its release.
+
 ## Before every push
 
 1. Run `make test` and `make e2e`. Both must pass.

@@ -21,6 +21,10 @@ case "$VARIANT" in
   release) NAME="Reforge";     BUNDLE_ID="local.reforge"; EXTRA_PLIST="" ;;
   *) echo "usage: $0 [dev|release] [output dir]" >&2; exit 1 ;;
 esac
+# Version: 1.0.<commits on this branch>, so every merge to main gets a higher one and a local
+# build of a commit matches the GitHub release built from it. CI can override with REFORGE_VERSION.
+BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
+VERSION="${REFORGE_VERSION:-1.0.$BUILD_NUMBER}"
 swift build -c release
 APP="$OUT/$NAME.app"
 rm -rf "$APP"
@@ -38,11 +42,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleExecutable</key><string>Reforge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
 $EXTRA_PLIST
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP"
-echo "Built $APP"
+echo "Built $APP ($VERSION)"

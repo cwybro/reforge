@@ -13,6 +13,7 @@ import Foundation
 ///   fixture.json              {"validKeys": [...], "mods": [CFMod...], "files": [CFFile...],
 ///                              "laterMods": [CFMod...]?, "pickFolder": "name"?, "categories": [...]?}
 ///                             Search matches mod names containing the text, sorted by name.
+///   app-update.jsonl          one {"version"} line per update install, then {"relaunched": true}
 ///   config.json               settings (seed it, or leave it out for a fresh install)
 ///   api-key                   the saved key
 ///   AddonGameInstance.json    stands in for the CurseForge app's tracking file
@@ -34,6 +35,8 @@ enum E2E {
         var categories: [CFCategory]?
         /// Files the fingerprint lookup recognises (by their modules' fingerprints).
         var fingerprintMatches: [CFFingerprintMatch]?
+        /// A newer Reforge release the updater finds (the app pretends to be 1.0).
+        var appUpdate: String?
     }
 
     static var isActive: Bool { !(ProcessInfo.processInfo.environment["REFORGE_E2E_FIXTURE"] ?? "").isEmpty }
@@ -54,6 +57,19 @@ enum E2E {
                 }
             }
         }
+    }
+
+    /// The app updater in stub mode: pretends to be the installed 1.0 release, finds the fixture's
+    /// `appUpdate` (if any), and records installs instead of replacing anything.
+    @MainActor
+    static func makeUpdater(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppUpdater? {
+        guard let path = environment["REFORGE_E2E_FIXTURE"], !path.isEmpty else { return nil }
+        let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let version = (try? Data(contentsOf: URL(fileURLWithPath: path)))
+            .flatMap { try? Store.decoder.decode(Fixture.self, from: $0) }?.appUpdate
+        let log = RecordingInstaller(dir: dir)
+        return AppUpdater(currentVersion: "1.0", appURL: dir.appendingPathComponent("Reforge.app"), isSupported: true,
+                          source: StubReleases(version: version), installer: RecordingAppInstaller(log: log))
     }
 
     /// Shared by every stub client the Model creates, so it can count update checks.
@@ -158,7 +174,7 @@ struct RecordingInstaller: AddonInstaller {
         try append(folders, to: "uninstalls.jsonl")
     }
 
-    private func append(_ object: Any, to name: String) throws {
+    func append(_ object: Any, to name: String) throws {
         let url = dir.appendingPathComponent(name)
         var line = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         line.append(0x0A)
@@ -185,4 +201,21 @@ struct RecordingScheduler: BackgroundScheduler {
 struct AllowingNotifier: UpdateNotifier {
     func requestPermission() async -> Bool { true }
     func post(title: String, body: String) async {}
+}
+
+struct StubReleases: ReleaseSource {
+    let version: String?
+    func latest() async throws -> AppRelease? {
+        version.map { AppRelease(version: $0, downloadURL: URL(string: "https://example.invalid/Reforge.zip")!,
+                                 pageURL: URL(string: "https://example.invalid/releases/v\($0)")!) }
+    }
+}
+
+/// Logs the update instead of downloading, swapping or relaunching.
+struct RecordingAppInstaller: AppInstalling {
+    let log: RecordingInstaller
+    func install(_ release: AppRelease, over app: URL) async throws {
+        try log.append(["version": release.version], to: "app-update.jsonl")
+    }
+    func relaunch(_ app: URL) { try? log.append(["relaunched": true], to: "app-update.jsonl") }
 }

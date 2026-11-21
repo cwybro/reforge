@@ -130,6 +130,9 @@ struct SmokeTests {
             try await app.waitFor("background checks turned off") {
                 fx.config["backgroundCheckHours"] == nil && fx.scheduledHours == nil
             }
+
+            try await app.press("settings.appUpdates")
+            try await app.waitFor("Reforge update checks turned off") { fx.config["checkAppUpdates"] as? Bool == false }
         }
     }
 
@@ -214,6 +217,24 @@ struct SmokeTests {
             try await app.performNamedAction("Move to Trash", on: "found.Homebrew")
             try await app.waitGone("found.Homebrew")
             try await app.waitFor("both Homebrew folders trashed") { fx.uninstalls == [["Homebrew", "Homebrew_Config"]] }
+        }
+    }
+
+    @Test func appUpdateBanner() async throws {
+        try await withReforge(.tracking, edit: { $0["appUpdate"] = "99.0.0" }) { app, fx in
+            try await app.waitForText("update.title", containing: "Reforge 99.0.0 is available")
+            try await app.press("update.install")
+            try await app.waitFor("the update installed, then a relaunch") {
+                let log = fx.appUpdateLog
+                return log.count == 2 && log[0]["version"] as? String == "99.0.0" && log[1]["relaunched"] as? Bool == true
+            }
+        }
+    }
+
+    @Test func noBannerWithoutANewerRelease() async throws {
+        try await withReforge(.tracking) { app, _ in
+            try await app.element("addonRow.\(Mods.alpha).update")   // the window has settled
+            #expect(app.find("update.banner") == nil)
         }
     }
 

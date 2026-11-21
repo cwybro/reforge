@@ -24,10 +24,12 @@ struct Config: Codable {
     var onboarded: Bool?
     /// How often to check for updates while the app is closed; nil = never (see BackgroundCheck).
     var backgroundCheckHours: Int?
+    /// Look for a newer Reforge on GitHub when the app opens; nil = on (see AppUpdate.swift).
+    var checkAppUpdates: Bool?
 
     enum CodingKeys: String, CodingKey {
         case legacyApiKey = "apiKey", addonsPath, gameVersionTypeId, allowPrerelease, addons, onboarded,
-             backgroundCheckHours
+             backgroundCheckHours, checkAppUpdates
     }
 }
 

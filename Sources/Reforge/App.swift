@@ -24,10 +24,11 @@ struct ReforgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// Production dependencies, unless REFORGE_E2E_FIXTURE selects the E2E stubs (see E2EStubs.swift).
     @State private var model = E2E.makeModel() ?? Model()
+    @State private var updater = E2E.makeUpdater() ?? AppUpdater()
 
     var body: some Scene {
         Window("Reforge", id: "main") {
-            RootView(model: model)
+            RootView(model: model, updater: updater)
                 .frame(minWidth: 680, minHeight: 480)
         }
         .defaultSize(width: 760, height: 540)
@@ -37,6 +38,18 @@ struct ReforgeApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
+                if updater.isSupported {
+                    Button("Check for Reforge Updates…") {
+                        Task {
+                            await updater.check(manual: true)
+                            switch updater.state {
+                            case .upToDate: model.message = "Reforge \(updater.currentVersion) is up to date."
+                            case .failed(let why, nil): model.message = why
+                            default: break
+                            }
+                        }
+                    }
+                }
                 Button("Show Welcome Screen") { withAnimation(.easeInOut(duration: 0.5)) { model.showOnboardingAgain() } }
             }
             CommandGroup(after: .newItem) {
@@ -45,7 +58,7 @@ struct ReforgeApp: App {
             }
         }
         Settings {
-            SettingsView(model: model)
+            SettingsView(model: model, updater: updater)
                 .preferredColorScheme(.dark)
                 .tint(Theme.magenta)
         }
@@ -55,13 +68,14 @@ struct ReforgeApp: App {
 /// Shows the welcome flow until it's been completed, then the addon list.
 struct RootView: View {
     @Bindable var model: Model
+    var updater: AppUpdater = .inert
 
     var body: some View {
         ZStack {
             if model.needsOnboarding {
                 OnboardingView(model: model).transition(.opacity)
             } else {
-                ContentView(model: model).transition(.asymmetric(
+                ContentView(model: model, updater: updater).transition(.asymmetric(
                     insertion: .opacity.combined(with: .scale(scale: 0.97)),
                     removal: .opacity))
             }
@@ -134,6 +148,7 @@ private enum TitlebarPassThrough {
 
 struct ContentView: View {
     @Bindable var model: Model
+    var updater: AppUpdater = .inert
     @State private var showingAdd = false
 
     var body: some View {
@@ -142,6 +157,10 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 Header(model: model, showingAdd: $showingAdd)
                     .zIndex(1)
+                if updater.showsBanner {
+                    UpdateBanner(updater: updater).padding(.horizontal, 20).padding(.bottom, 12)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 if !model.hasKey {
                     KeyBanner(model: model).padding(.horizontal, 20).padding(.bottom, 12)
                 }
@@ -173,7 +192,61 @@ struct ContentView: View {
         .ignoresSafeArea()
         .sheet(isPresented: $showingAdd) { AddSheet(model: model) }
         .task { await model.refresh() }
+        .task { if model.config.checkAppUpdates != false { await updater.check() } }
+        .animation(.easeOut(duration: 0.25), value: updater.showsBanner)
     }
+}
+
+/// "Reforge 1.0.12 is available" with Install & Relaunch.
+struct UpdateBanner: View {
+    let updater: AppUpdater
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(Theme.cyan)
+                .shadow(color: Theme.cyan.opacity(0.5), radius: 6)
+            VStack(alignment: .leading, spacing: 3) {
+                if let release = updater.offered {
+                    Text("Reforge \(release.version) is available")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .accessibilityIdentifier("update.title")
+                    HStack(spacing: 6) {
+                        Text("You have \(updater.currentVersion).")
+                        Link("What's new", destination: release.pageURL)
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.white.opacity(0.55))
+                }
+                if case .failed(let why, _) = updater.state {
+                    Text(why).font(.system(size: 11.5)).foregroundStyle(.orange)
+                        .accessibilityIdentifier("update.error")
+                }
+            }
+            Spacer()
+            if case .installing = updater.state {
+                ProgressView().controlSize(.small)
+                Text("Installing…").font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
+            } else {
+                Button("Later") { updater.dismissed = true }
+                    .buttonStyle(QuietButtonStyle())
+                    .accessibilityIdentifier("update.later")
+                Button(isFailed ? "Try Again" : "Install & Relaunch") {
+                    Task { await updater.install() }
+                }
+                .buttonStyle(GlowButtonStyle(compact: true))
+                .accessibilityIdentifier("update.install")
+            }
+        }
+        .padding(14)
+        .background(Card())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("update.banner")
+    }
+
+    private var isFailed: Bool { if case .failed = updater.state { return true }; return false }
 }
 
 /// Static version of the welcome screen's backdrop: same colours, no animation.
@@ -781,6 +854,7 @@ enum FolderPicker {
 
 struct SettingsView: View {
     @Bindable var model: Model
+    var updater: AppUpdater = .inert
 
     var body: some View {
         Form {
@@ -826,6 +900,18 @@ struct SettingsView: View {
             }
             Button("Import Addons from CurseForge App") { model.reimportFromCurseForge() }
                 .accessibilityIdentifier("settings.import")
+            if updater.isSupported {
+                Toggle("Check for Reforge updates", isOn: Binding(
+                    get: { model.config.checkAppUpdates != false },
+                    set: { on in
+                        model.config.checkAppUpdates = on
+                        model.save()
+                        if on { Task { await updater.check() } }
+                    }))
+                    .accessibilityIdentifier("settings.appUpdates")
+                Text("Looks for a new release on GitHub when Reforge opens (you're on \(updater.currentVersion)).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(20)
         .frame(width: 520)

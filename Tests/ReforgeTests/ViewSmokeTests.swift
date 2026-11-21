@@ -59,6 +59,17 @@ struct ViewSmokeTests {
         render(SettingsView(model: env.makeModel()), width: 520, height: 320)
     }
 
+    @Test func updateBanner() async throws {
+        let source = FakeReleases(); source.release = release("1.0.12")
+        let u = AppUpdater(currentVersion: "1.0.8", appURL: URL(fileURLWithPath: "/tmp/R.app"), isSupported: true,
+                           source: source, installer: FakeAppInstaller())
+        await u.check()
+        let env = try TestEnv(key: "$2a$10$k")
+        render(ContentView(model: env.makeModel(), updater: u))
+        render(UpdateBanner(updater: u), width: 700, height: 80)
+        render(SettingsView(model: env.makeModel(), updater: u), width: 520, height: 400)
+    }
+
     @Test func addSheet() throws {
         let env = try TestEnv(key: "$2a$10$k")
         render(AddSheet(model: env.makeModel()), width: 620, height: 580)

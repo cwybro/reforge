@@ -1,0 +1,61 @@
+# Every push to main (a merge or a direct push) builds Reforge.app and publishes it as a GitHub
+# release tagged v1.0.<commits on main>. The app's updater looks for the newest of these releases
+# and installs its Reforge.zip (see Sources/Reforge/AppUpdate.swift).
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One release at a time, in push order, so versions never race.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version is the commit count, so it needs the whole history
+
+      - name: Version
+        run: |
+          version="1.0.$(git rev-list --count HEAD)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "Reforge $version"
+
+      - name: Skip if already released
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already exists"; echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Unit tests
+        if: steps.existing.outputs.skip != 'true'
+        run: make test
+
+      - name: Build
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          REFORGE_VERSION="$VERSION" ./build.sh release "$RUNNER_TEMP/out"
+          ditto -c -k --keepParent "$RUNNER_TEMP/out/Reforge.app" "$RUNNER_TEMP/Reforge.zip"
+          shasum -a 256 "$RUNNER_TEMP/Reforge.zip"
+
+      - name: Publish release
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" "$RUNNER_TEMP/Reforge.zip" \
+            --target "$GITHUB_SHA" \
+            --title "Reforge $VERSION" \
+            --generate-notes
