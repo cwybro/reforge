@@ -8,6 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         if E2E.isActive { E2E.stayOutOfTheWay() }
     }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        PerfProbe.startIfRequested()
+    }
 }
 
 /// The LaunchAgent runs this executable with `--background-check` (see BackgroundCheck.swift):
@@ -59,6 +63,7 @@ struct ReforgeApp: App {
         }
         Settings {
             SettingsView(model: model, updater: updater)
+                .opensLinksWithOpener()
                 .preferredColorScheme(.dark)
                 .tint(Theme.magenta)
         }
@@ -86,6 +91,7 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .tint(Theme.magenta)
         .background(WindowConfigurator())
+        .opensLinksWithOpener()
         .task { model.syncBackgroundChecks() }
     }
 }
@@ -185,6 +191,7 @@ struct ContentView: View {
                         .padding(.bottom, 12)
                     }
                     .accessibilityIdentifier("main.list")
+                    .onAppear { PerfProbe.mark("main.list") }
                 }
                 StatusBar(model: model)
             }
@@ -216,6 +223,7 @@ struct UpdateBanner: View {
                     HStack(spacing: 6) {
                         Text("You have \(updater.currentVersion).")
                         Link("What's new", destination: release.pageURL)
+                            .accessibilityIdentifier("update.whatsNew")
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(.white.opacity(0.55))
@@ -353,10 +361,10 @@ private struct AddonRow: View {
         .accessibilityIdentifier("addonRow.\(addon.id)")
         .contextMenu {
             if let s = addon.websiteURL, let u = URL(string: s) {
-                Button("Open on CurseForge") { NSWorkspace.shared.open(u) }
+                Button("Open on CurseForge") { Opener.open(u) }
             }
             Button("Show in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting(addon.folders.map { model.addonsDir.appendingPathComponent($0) })
+                Opener.reveal(addon.folders.map { model.addonsDir.appendingPathComponent($0) })
             }
             Divider()
             Button("Stop Tracking") { Task { await model.stopTracking(addon) } }
@@ -364,6 +372,8 @@ private struct AddonRow: View {
         }
         // The same commands for VoiceOver and other assistive tools (and the E2E tests), which
         // can't rely on a context menu opening.
+        .accessibilityAction(named: "Open on CurseForge") { addon.websiteURL.flatMap(URL.init(string:)).map(Opener.open) }
+        .accessibilityAction(named: "Show in Finder") { Opener.reveal(addon.folders.map { model.addonsDir.appendingPathComponent($0) }) }
         .accessibilityAction(named: "Stop Tracking") { Task { await model.stopTracking(addon) } }
         .accessibilityAction(named: "Uninstall (Move to Trash)") { model.remove(addon, deleteFiles: true) }
     }
@@ -528,15 +538,17 @@ private struct FoundRow: View {
         .accessibilityIdentifier("found.\(addon.id)")
         .contextMenu {
             if let s = addon.websiteURL, let u = URL(string: s) {
-                Button("Open on CurseForge") { NSWorkspace.shared.open(u) }
+                Button("Open on CurseForge") { Opener.open(u) }
             }
             Button("Show in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting(addon.folders.map { model.addonsDir.appendingPathComponent($0) })
+                Opener.reveal(addon.folders.map { model.addonsDir.appendingPathComponent($0) })
             }
             Divider()
             Button("Move to Trash") { model.trash(addon) }
         }
         // The same command for assistive tools (and the E2E tests); must follow the element above.
+        .accessibilityAction(named: "Open on CurseForge") { addon.websiteURL.flatMap(URL.init(string:)).map(Opener.open) }
+        .accessibilityAction(named: "Show in Finder") { Opener.reveal(addon.folders.map { model.addonsDir.appendingPathComponent($0) }) }
         .accessibilityAction(named: "Move to Trash") { model.trash(addon) }
     }
 }
@@ -594,12 +606,14 @@ struct AddSheet: View {
                     ForEach(SearchSort.allCases) { Text($0.title).tag($0) }
                 }
                 .fixedSize()
+                .adjustable($search.sort, through: SearchSort.allCases)
                 .accessibilityIdentifier("search.sort")
                 Picker("Category", selection: $search.categoryId) {
                     Text("All categories").tag(Int?.none)
                     ForEach(search.categories) { Text($0.name).tag(Int?.some($0.id)) }
                 }
                 .fixedSize()
+                .adjustable($search.categoryId, through: [nil] + search.categories.map { Optional($0.id) })
                 .accessibilityIdentifier("search.category")
                 Spacer()
                 if search.loading { ProgressView().controlSize(.small) }
@@ -618,7 +632,8 @@ struct AddSheet: View {
         .frame(width: 620, height: 580)
         .background(AppBackground())
         .preferredColorScheme(.dark)
-        .onAppear { fieldFocused = true }
+        .onAppear { fieldFocused = true; PerfProbe.mark("addSheet") }
+        .onChange(of: search.results.map(\.id)) { PerfProbe.mark("search.results") }
         .task { await search.loadCategories() }
         // Re-search whenever the text, sort or category changes; the pause lets typing settle
         // (a newer change cancels this task before it fires).
@@ -651,8 +666,10 @@ struct AddSheet: View {
             VStack(spacing: 10) {
                 Text(error).foregroundStyle(.orange).multilineTextAlignment(.center)
                 Button("Try Again") { Task { await search.run() } }.buttonStyle(QuietButtonStyle())
+                    .accessibilityIdentifier("search.retry")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("search.error")
         } else if search.results.isEmpty {
             Group {
@@ -724,6 +741,7 @@ private struct SearchResultRow: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.45))
                             .help("Open on CurseForge")
+                            .accessibilityIdentifier("search.result.\(mod.id).link")
                     }
                 }
                 if let summary = mod.summary, !summary.isEmpty {
@@ -875,6 +893,7 @@ struct SettingsView: View {
                 Text("Mists Classic").tag(79434)
                 Text("Anniversary").tag(73246)
             }
+            .adjustable($model.config.gameVersionTypeId, through: [517, 67408, 79434, 73246])
             .accessibilityIdentifier("settings.gameVersion")
             Toggle("Include beta/alpha releases", isOn: $model.config.allowPrerelease)
                 .accessibilityIdentifier("settings.prerelease")
@@ -890,6 +909,9 @@ struct SettingsView: View {
                 }
             }
             .disabled(model.config.backgroundCheckHours == nil)
+            .adjustable(Binding(
+                get: { model.config.backgroundCheckHours ?? BackgroundCheck.defaultHours },
+                set: { hours in Task { await model.setBackgroundChecks(hours: hours) } }), through: BackgroundCheck.intervals)
             .accessibilityIdentifier("settings.backgroundInterval")
             if let problem = model.backgroundCheckProblem {
                 Text(problem).font(.caption).foregroundStyle(.orange)
@@ -916,8 +938,40 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 520)
         .onDisappear { model.saveAPIKey(); model.save() }
+        // SwiftUI keeps the Settings window's view alive when it's closed, so onDisappear doesn't
+        // fire then. Save a key typed without pressing Return when its window closes.
+        .background(WindowCloseObserver { model.saveAPIKey(); model.save() })
         .onChange(of: model.config.addonsPath) { model.save() }
         .onChange(of: model.config.gameVersionTypeId) { model.save() }
         .onChange(of: model.config.allowPrerelease) { model.save() }
+    }
+}
+
+/// Calls `onClose` when the window hosting this view is about to close.
+struct WindowCloseObserver: NSViewRepresentable {
+    let onClose: () -> Void
+
+    func makeNSView(context: Context) -> NSView { Tracker(onClose: onClose) }
+    func updateNSView(_ view: NSView, context: Context) { (view as? Tracker)?.onClose = onClose }
+
+    final class Tracker: NSView {
+        var onClose: () -> Void
+        private var token: NSObjectProtocol?
+
+        init(onClose: @escaping () -> Void) { self.onClose = onClose; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let token { NotificationCenter.default.removeObserver(token) }
+            token = nil
+            guard let window else { return }
+            token = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+                                                           object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onClose() }
+            }
+        }
+
+        deinit { if let token { NotificationCenter.default.removeObserver(token) } }
     }
 }

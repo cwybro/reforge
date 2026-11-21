@@ -72,6 +72,7 @@ Builds are signed locally (ad-hoc), so after a rebuild macOS may ask whether Ref
 | `make build` | Build `build/Reforge Dev.app` (git-ignored): a separate app (bundle ID `local.reforge.dev`) that never competes with the installed `Reforge.app` |
 | `make test` | Run the test suite: headless flow tests (Swift Testing) with the network, Keychain and your real folders stubbed out |
 | `make e2e` | Build `build/Reforge Dev.app`, then run end-to-end smoke tests that launch it in stub mode (fixture-backed CurseForge, temp settings, recorded installs: no network, Keychain or real AddOns folder) and drive it through the Accessibility API. Opt-in and not part of `make test`. Needs Accessibility permission for your terminal or IDE (System Settings → Privacy & Security → Accessibility); the app runs invisibly and never takes focus |
+| `make perf` | Build the app and run the performance suite: launch time, idle CPU and memory, how long screens take to appear, missed frames while scrolling and animating, and benchmarks of the scanning and decoding code. Prints a table (also saved to `build/perf/latest.txt`). Timings vary between runs and machines, so the budgets are loose regression guards. Opens visible, never-focused windows for about a minute |
 | `make dev` | Build and open a dev copy that keeps its settings and API key in `./.dev` (git-ignored) instead of Application Support and the Keychain, so rebuilds never trigger Keychain prompts |
 | `make icon` | Redraw the app icon |
 | `make clean` | Remove build output |

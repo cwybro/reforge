@@ -14,6 +14,8 @@ import Foundation
 ///                              "laterMods": [CFMod...]?, "pickFolder": "name"?, "categories": [...]?}
 ///                             Search matches mod names containing the text, sorted by name.
 ///   app-update.jsonl          one {"version"} line per update install, then {"relaunched": true}
+///   searches.jsonl            one {"text", "sort", "categoryId"} line per search
+///   opens.jsonl               one {"url"} or {"reveal": [paths]} line per web page / Finder reveal
 ///   config.json               settings (seed it, or leave it out for a fresh install)
 ///   api-key                   the saved key
 ///   AddonGameInstance.json    stands in for the CurseForge app's tracking file
@@ -37,6 +39,18 @@ enum E2E {
         var fingerprintMatches: [CFFingerprintMatch]?
         /// A newer Reforge release the updater finds (the app pretends to be 1.0).
         var appUpdate: String?
+
+        // Failure switches, for the error paths of the UI.
+        /// Update checks (mods lookups) fail with HTTP 500.
+        var failChecks: Bool?
+        /// Installing these file ids fails.
+        var failInstallFileIds: [Int]?
+        /// Searches whose text contains this fail with HTTP 500.
+        var failSearchContaining: String?
+        /// The notification permission request is denied.
+        var denyNotifications: Bool?
+        /// Installing the app update fails.
+        var appUpdateFails: Bool?
     }
 
     static var isActive: Bool { !(ProcessInfo.processInfo.environment["REFORGE_E2E_FIXTURE"] ?? "").isEmpty }
@@ -49,6 +63,9 @@ enum E2E {
     @MainActor
     static func stayOutOfTheWay() {
         NSApp.setActivationPolicy(.accessory)
+        // `make perf` keeps windows visible: SwiftUI may skip drawing a fully transparent window,
+        // which would make frame timings look better than they are. It still never takes focus.
+        if !(ProcessInfo.processInfo.environment["REFORGE_PERF_DIR"] ?? "").isEmpty { return }
         NotificationCenter.default.addObserver(forName: NSApplication.didUpdateNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
                 for w in NSApp.windows where w.alphaValue != 0 {
@@ -65,11 +82,11 @@ enum E2E {
     static func makeUpdater(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppUpdater? {
         guard let path = environment["REFORGE_E2E_FIXTURE"], !path.isEmpty else { return nil }
         let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
-        let version = (try? Data(contentsOf: URL(fileURLWithPath: path)))
-            .flatMap { try? Store.decoder.decode(Fixture.self, from: $0) }?.appUpdate
+        let fixture = (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { try? Store.decoder.decode(Fixture.self, from: $0) }
         let log = RecordingInstaller(dir: dir)
         return AppUpdater(currentVersion: "1.0", appURL: dir.appendingPathComponent("Reforge.app"), isSupported: true,
-                          source: StubReleases(version: version), installer: RecordingAppInstaller(log: log))
+                          source: StubReleases(version: fixture?.appUpdate),
+                          installer: RecordingAppInstaller(log: log, fails: fixture?.appUpdateFails == true))
     }
 
     /// Shared by every stub client the Model creates, so it can count update checks.
@@ -86,14 +103,18 @@ enum E2E {
         do { fixture = try Store.decoder.decode(Fixture.self, from: data) }
         catch { fatalError("REFORGE_E2E_FIXTURE: bad fixture \(path): \(error)") }
         let calls = Calls()
-        return Model(makeAPI: { StubCurseForge(key: $0, fixture: fixture, calls: calls) },
+        let log = RecordingInstaller(dir: dir)
+        // Web pages and Finder reveals are recorded, never opened.
+        Opener.open = { url in try? log.append(["url": url.absoluteString], to: "opens.jsonl") }
+        Opener.reveal = { urls in try? log.append(["reveal": urls.map(\.path)], to: "opens.jsonl") }
+        return Model(makeAPI: { StubCurseForge(key: $0, fixture: fixture, calls: calls, log: log) },
                      keyStore: FileKeyStore(file: dir.appendingPathComponent("api-key")),
                      configStore: FileConfigStore(dir: dir),
-                     installer: RecordingInstaller(dir: dir),
+                     installer: RecordingInstaller(dir: dir, failing: Set(fixture.failInstallFileIds ?? [])),
                      curseForgeImportFile: dir.appendingPathComponent("AddonGameInstance.json"),
                      chooseFolder: { _ in fixture.pickFolder.map { dir.appendingPathComponent($0, isDirectory: true) } },
                      scheduler: RecordingScheduler(file: dir.appendingPathComponent("schedule.json")),
-                     notifier: AllowingNotifier())
+                     notifier: StubNotifier(allow: fixture.denyNotifications != true))
     }
 }
 
@@ -102,6 +123,7 @@ struct StubCurseForge: CurseForgeClient {
     let key: String
     let fixture: E2E.Fixture
     let calls: E2E.Calls
+    let log: RecordingInstaller
 
     private func authorize() throws {
         if key.isEmpty { throw CFError.noKey }
@@ -111,6 +133,7 @@ struct StubCurseForge: CurseForgeClient {
     func validateKey() async throws { try authorize() }
     func mods(_ ids: [Int]) async throws -> [CFMod] {
         try authorize()
+        if fixture.failChecks == true { throw CFError.http(500, "CurseForge is down") }
         calls.modsCalls += 1
         var mods = fixture.mods
         if calls.modsCalls > 1, let later = fixture.laterMods {
@@ -133,6 +156,8 @@ struct StubCurseForge: CurseForgeClient {
     }
     func search(_ q: SearchQuery) async throws -> (mods: [CFMod], total: Int) {
         try authorize()
+        try? log.append(["text": q.text, "sort": q.sort.rawValue, "categoryId": q.categoryId ?? NSNull()], to: "searches.jsonl")
+        if let bad = fixture.failSearchContaining, q.text.contains(bad) { throw CFError.http(500, "search is down") }
         let all = fixture.mods
             .filter { q.text.isEmpty || $0.name.localizedCaseInsensitiveContains(q.text) }
             .sorted { $0.name < $1.name }
@@ -162,10 +187,13 @@ struct FileKeyStore: KeyStore {
 /// Logs installs and uninstalls instead of downloading or touching the AddOns folder.
 struct RecordingInstaller: AddonInstaller {
     let dir: URL
+    /// File ids whose install fails (after being logged).
+    var failing: Set<Int> = []
 
     func install(_ file: CFFile, replacing oldFolders: [String], addonsDir: URL) async throws -> [String] {
         let entry: [String: Any] = ["fileId": file.id, "modId": file.modId, "replacing": oldFolders]
         try append(entry, to: "installs.jsonl")
+        if failing.contains(file.id) { throw CFError.http(500, "download failed") }
         let folders = (file.modules ?? []).map(\.name)
         return folders.isEmpty ? [file.displayName] : folders
     }
@@ -197,9 +225,10 @@ struct RecordingScheduler: BackgroundScheduler {
     }
 }
 
-/// Grants permission without the system prompt and posts nothing.
-struct AllowingNotifier: UpdateNotifier {
-    func requestPermission() async -> Bool { true }
+/// Answers the permission request without the system prompt, and posts nothing.
+struct StubNotifier: UpdateNotifier {
+    var allow = true
+    func requestPermission() async -> Bool { allow }
     func post(title: String, body: String) async {}
 }
 
@@ -214,8 +243,10 @@ struct StubReleases: ReleaseSource {
 /// Logs the update instead of downloading, swapping or relaunching.
 struct RecordingAppInstaller: AppInstalling {
     let log: RecordingInstaller
+    var fails = false
     func install(_ release: AppRelease, over app: URL) async throws {
         try log.append(["version": release.version], to: "app-update.jsonl")
+        if fails { throw UpdateError("The download failed.") }
     }
     func relaunch(_ app: URL) { try? log.append(["relaunched": true], to: "app-update.jsonl") }
 }

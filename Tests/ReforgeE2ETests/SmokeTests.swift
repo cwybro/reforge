@@ -8,10 +8,13 @@ import Testing
 
 /// Launches Reforge on a fresh fixture, runs `body`, and always quits the app afterwards.
 /// `addonFiles` (path -> contents) are written into the fixture's AddOns folder before launch.
+/// `prepare` runs after the fixture is written and before launch (e.g. to remove or add files).
 func withReforge(_ start: E2EFixture.Start, edit: (inout [String: Any]) -> Void = { _ in },
                  addonFiles: [String: String] = [:],
+                 prepare: (E2EFixture) throws -> Void = { _ in },
                  _ body: (AXApp, E2EFixture) async throws -> Void) async throws {
     let fixture = try E2EFixture(start, edit: edit)
+    try prepare(fixture)
     for (path, contents) in addonFiles {
         let url = fixture.addonsDir.appendingPathComponent(path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

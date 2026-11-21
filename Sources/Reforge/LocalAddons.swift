@@ -257,15 +257,17 @@ enum Discovery {
                                          websiteURL: mod.links?.websiteUrl, file: nil))
         }
 
-        // Local: attach helpers to the longest folder name they extend.
-        let names = remaining.map(\.name)
+        // Local: attach helpers to the longest folder name they extend ("Foo_Options", "Foo-Core"
+        // -> "Foo"). Only the name's own prefixes before a "_" or "-" can be owners, so look those up.
+        let byLower = Dictionary(remaining.map { ($0.name.lowercased(), $0.name) }, uniquingKeysWith: { a, _ in a })
         var parent: [String: String] = [:]
         for f in remaining {
             let lower = f.name.lowercased()
-            if let owner = names.filter({ $0 != f.name && (lower.hasPrefix($0.lowercased() + "_") || lower.hasPrefix($0.lowercased() + "-")) })
-                .max(by: { $0.count < $1.count }) {
-                parent[f.name] = owner
+            var owner: String?
+            for i in lower.indices where lower[i] == "_" || lower[i] == "-" {
+                if let o = byLower[String(lower[..<i])] { owner = o }   // later separators give longer owners
             }
+            if let owner { parent[f.name] = owner }
         }
         func root(_ name: String) -> String { parent[name].map(root) ?? name }
         let localGroups = Dictionary(grouping: remaining, by: { root($0.name) })

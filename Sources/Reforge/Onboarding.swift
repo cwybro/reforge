@@ -163,6 +163,7 @@ struct FolderStep: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .accessibilityIdentifier("onboarding.folder.version")
                 .onChange(of: model.config.gameVersionTypeId) { _, new in
                     model.config.addonsPath = Model.defaultAddonsPath(gameVersionTypeId: new)
                 }
@@ -187,6 +188,7 @@ struct FolderStep: View {
                 if !folderExists {
                     Text("That folder doesn't exist yet. Pick the AddOns folder inside your World of Warcraft install.")
                         .font(.callout).foregroundStyle(.orange.opacity(0.9))
+                        .accessibilityIdentifier("onboarding.folder.missing")
                         .multilineTextAlignment(.center)
                         .transition(.opacity)
                 }
@@ -239,6 +241,7 @@ struct KeyStep: View {
                         HStack(spacing: 4) {
                             Text("No key yet?").foregroundStyle(.white.opacity(0.6))
                             Link("Get one from CurseForge", destination: URL(string: "https://docs.curseforge.com/")!)
+                                .accessibilityIdentifier("onboarding.key.learn")
                         }
                     }
                 }

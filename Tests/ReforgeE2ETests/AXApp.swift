@@ -40,13 +40,19 @@ final class AXApp {
     }
 
     /// Launches a fresh instance with REFORGE_E2E_FIXTURE set. Always pair with `terminate()`.
-    static func launch(fixture: URL) async throws -> AXApp {
+    static func launch(fixture: URL, environment: [String: String] = [:]) async throws -> AXApp {
         guard AXIsProcessTrusted() else {
             throw E2EError("""
                 Accessibility permission is missing, so the E2E tests can't drive Reforge.app.
                 Grant it to the app running the tests (your terminal or IDE) in System Settings →
                 Privacy & Security → Accessibility, then restart that app and run `make e2e` again.
                 """)
+        }
+        // While the screen is locked or the display asleep, macOS hides window contents from the
+        // Accessibility API, so every lookup would time out. Say so instead.
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any] ?? [:]
+        if (session["CGSSessionScreenIsLocked"] as? Bool) == true || CGDisplayIsAsleep(CGMainDisplayID()) != 0 {
+            throw E2EError("The screen is locked or the display is asleep. UI tests need an unlocked, awake Mac.")
         }
         guard FileManager.default.fileExists(atPath: reforgeAppURL.path) else {
             throw E2EError("\(reforgeAppURL.path) not found. Run ./build.sh first (make e2e does this).")
@@ -55,7 +61,7 @@ final class AXApp {
         config.createsNewApplicationInstance = true
         config.activates = false
         config.addsToRecentItems = false
-        config.environment = ["REFORGE_E2E_FIXTURE": fixture.path]
+        config.environment = environment.merging(["REFORGE_E2E_FIXTURE": fixture.path]) { $1 }
         // Don't restore windows from a previous (possibly real) session.
         config.arguments = ["-ApplePersistenceIgnoreState", "YES"]
         let running = try await NSWorkspace.shared.openApplication(at: reforgeAppURL, configuration: config)
@@ -109,6 +115,39 @@ final class AXApp {
         }
         let err = AXUIElementPerformAction(item!, kAXPressAction as CFString)
         try #require(err == .success, "AXPress on \(menu) → \(title) failed: \(err.rawValue)", sourceLocation: sourceLocation)
+    }
+
+    /// Performs a standard action, e.g. kAXIncrementAction on a picker made `.adjustable`.
+    func perform(_ action: String, on id: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let el = try await element(id, sourceLocation: sourceLocation)
+        let err = AXUIElementPerformAction(el, action as CFString)
+        try #require(err == .success, "\(action) on \(id) failed: \(err.rawValue)", sourceLocation: sourceLocation)
+    }
+
+    /// Presses the child of `id` with this title, e.g. one segment of a segmented picker.
+    func pressChild(of id: String, titled title: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let parent = try await element(id, sourceLocation: sourceLocation)
+        func search(_ el: AXUIElement, depth: Int) -> AXUIElement? {
+            if el.string(kAXTitleAttribute) == title || el.string(kAXDescriptionAttribute) == title { return el }
+            guard depth < 6 else { return nil }
+            for c in el.children(kAXChildrenAttribute) { if let hit = search(c, depth: depth + 1) { return hit } }
+            return nil
+        }
+        let child = try #require(search(parent, depth: 0), "\(id) has no child titled \(title)", sourceLocation: sourceLocation)
+        let err = AXUIElementPerformAction(child, kAXPressAction as CFString)
+        try #require(err == .success, "AXPress on \(title) failed: \(err.rawValue)", sourceLocation: sourceLocation)
+    }
+
+    /// Closes the window whose title contains `title` with its close button.
+    func closeWindow(titled title: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        var window: AXUIElement?
+        try await waitFor("a window titled \(title)", sourceLocation: sourceLocation) {
+            window = windows.first { $0.string(kAXTitleAttribute)?.contains(title) == true }
+            return window != nil
+        }
+        let close = try #require(window!.attribute(kAXCloseButtonAttribute).map { $0 as! AXUIElement },
+                                 "\(title) has no close button", sourceLocation: sourceLocation)
+        AXUIElementPerformAction(close, kAXPressAction as CFString)
     }
 
     /// Performs a SwiftUI `.accessibilityAction(named:)` on an element. AX lists those as

@@ -279,6 +279,7 @@ final class Model {
         for a in updatable { await update(a) }
         let failed = config.addons.filter { if case .failed = status[$0.id] { return true }; return false }
         message = failed.isEmpty ? "All updates installed." : "\(failed.count) update(s) failed."
+        PerfProbe.mark("updateAll.done")
     }
 
     /// Accepts a CurseForge project ID or a curseforge.com/wow/addons/<slug> URL or bare slug.

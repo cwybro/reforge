@@ -9,6 +9,7 @@ let badKey = "$2a$10$e2e-rejected-key"
 /// Alpha and Bravo are tracked with older files; Charlie can be added; Delta comes from the import file.
 enum Mods {
     static let alpha = 101, bravo = 102, charlie = 103, delta = 104
+    static let manyBase = 10_000
 }
 
 final class E2EFixture {
@@ -21,6 +22,11 @@ final class E2EFixture {
         case fresh
         /// Onboarded, valid key, Alpha and Bravo tracked with updates available.
         case tracking
+        /// Like `tracking`, but no API key saved yet.
+        case trackingNoKey
+        /// Onboarded, valid key, `n` tracked addons ("Addon 0001"…), each with an update available.
+        /// Their project ids start at `Mods.manyBase`.
+        case many(Int)
     }
 
     /// `edit` adjusts the stub's fixture.json (see E2E.Fixture) before the app reads it.
@@ -29,6 +35,10 @@ final class E2EFixture {
         dir = fm.temporaryDirectory.appendingPathComponent("ReforgeE2E-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: addonsDir, withIntermediateDirectories: true)
         var fixture = Self.fixture
+        if case .many(let n) = start {
+            fixture["mods"] = (0..<n).map { i in Self.mod(Mods.manyBase + i, Self.manyName(i), latest: 500_000 + i) }
+            fixture["files"] = (0..<n).map { i in Self.file(500_000 + i, mod: Mods.manyBase + i, "\(Self.manyName(i)) new", folder: Self.manyName(i)) }
+        }
         edit(&fixture)
         try write("fixture.json", fixture)
         switch start {
@@ -38,11 +48,16 @@ final class E2EFixture {
                 "addonID": Mods.delta, "name": "Delta", "modFolderPath": addonsDir.path,
                 "installedFile": ["id": 4000, "displayName": "Delta 4.0", "modules": [["foldername": "Delta"]]],
             ]]]])
-        case .tracking:
+        case .tracking, .trackingNoKey:
             try write("config.json", config(onboarded: true, addons: [
                 tracked(Mods.alpha, "Alpha", fileId: 1000),
                 tracked(Mods.bravo, "Bravo", fileId: 2000),
             ]))
+            if case .tracking = start { try Data(goodKey.utf8).write(to: dir.appendingPathComponent("api-key")) }
+        case .many(let n):
+            try write("config.json", config(onboarded: true, addons: (0..<n).map { i in
+                tracked(Mods.manyBase + i, Self.manyName(i), fileId: 400_000 + i)
+            }))
             try Data(goodKey.utf8).write(to: dir.appendingPathComponent("api-key"))
         }
     }
@@ -68,6 +83,30 @@ final class E2EFixture {
     }
 
     var uninstalls: [[String]] { lines("uninstalls.jsonl").compactMap { $0 as? [String] } }
+
+    /// Web pages the app opened (opens.jsonl).
+    var openedURLs: [String] { lines("opens.jsonl").compactMap { ($0 as? [String: Any])?["url"] as? String } }
+
+    /// Folders the app revealed in Finder, by last path component.
+    var revealed: [[String]] {
+        lines("opens.jsonl").compactMap { ($0 as? [String: Any])?["reveal"] as? [String] }
+            .map { $0.map { URL(fileURLWithPath: $0).lastPathComponent } }
+    }
+
+    /// Searches the stub CurseForge received: (text, sort raw value, category id).
+    var searches: [(text: String, sort: Int, categoryId: Int?)] {
+        lines("searches.jsonl").compactMap { $0 as? [String: Any] }.map {
+            ($0["text"] as? String ?? "", $0["sort"] as? Int ?? 0, $0["categoryId"] as? Int)
+        }
+    }
+
+    /// Stands in for the CurseForge app's tracking file, listing `addons` (id, name, file id) in this AddOns folder.
+    func writeCurseForgeImport(_ addons: [(id: Int, name: String, fileId: Int)]) throws {
+        try write("AddonGameInstance.json", [["installedAddons": addons.map { a in [
+            "addonID": a.id, "name": a.name, "modFolderPath": addonsDir.path,
+            "installedFile": ["id": a.fileId, "displayName": "\(a.name) \(a.fileId)", "modules": [["foldername": a.name]]],
+        ] as [String: Any] }]])
+    }
 
     /// Lines of app-update.jsonl: what the stub app updater installed, then whether it relaunched.
     var appUpdateLog: [[String: Any]] { lines("app-update.jsonl").compactMap { $0 as? [String: Any] } }
@@ -116,8 +155,11 @@ final class E2EFixture {
     }
 
     private func tracked(_ id: Int, _ name: String, fileId: Int) -> [String: Any] {
-        ["id": id, "name": name, "fileId": fileId, "version": "\(name) old", "folders": [name]]
+        ["id": id, "name": name, "fileId": fileId, "version": "\(name) old", "folders": [name],
+         "websiteURL": "https://www.curseforge.com/wow/addons/\(name.lowercased())"]
     }
+
+    static func manyName(_ i: Int) -> String { String(format: "Addon %04d", i + 1) }
 
     static func mod(_ id: Int, _ name: String, latest: Int) -> [String: Any] {
         ["id": id, "name": name, "slug": name.lowercased(),

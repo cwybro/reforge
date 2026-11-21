@@ -1,4 +1,5 @@
 # Reforge — common tasks. Run `make help` for the list.
+SHELL := /bin/bash
 APP_NAME    := Reforge.app
 DEV_APP     := build/Reforge Dev.app
 INSTALL_DIR ?= /Applications
@@ -9,7 +10,7 @@ ifneq ($(PICKED_SDK),)
 export SDKROOT := $(PICKED_SDK)
 endif
 
-.PHONY: help build test e2e install reinstall run dev icon clean
+.PHONY: help build test e2e perf perf-trace install reinstall run dev icon clean
 
 help:
 	@echo "make install   Build and (re)install $(APP_NAME) into $(INSTALL_DIR)"
@@ -18,6 +19,8 @@ help:
 	@echo "make build     Build only (creates \"$(DEV_APP)\", separate from the installed app)"
 	@echo "make test      Run the headless test suite (swift test)"
 	@echo "make e2e       Build the app and run the end-to-end smoke tests (needs Accessibility permission)"
+	@echo "make perf      Build the app and run the performance suite (timings, not part of test/e2e)"
+	@echo "make perf-trace  Record render hitches with Instruments (needs Xcode; slow)"
 	@echo "make icon      Redraw the app icon from scripts/make-icon.swift"
 	@echo "make clean     Remove build outputs"
 
@@ -39,6 +42,35 @@ endif
 
 test:
 	swift test $(TEST_FLAGS) --skip ReforgeE2ETests $(ARGS)
+
+# Timings: launch, idle CPU/memory, how fast screens appear, missed frames, and the hot code
+# paths. Opens visible (never focused) app windows for about a minute. Results print as a table
+# and are saved to build/perf/latest.txt; budgets are loose, so a failure means a clear regression.
+perf: build
+	@mkdir -p build/perf
+	@REFORGE_PERF=1 swift test $(TEST_FLAGS) --filter "PerformanceTests|PerformanceBenchmarks" $(ARGS) > build/perf/latest.log 2>&1; \
+		status=$$?; \
+		grep -E "✘|error:" build/perf/latest.log; \
+		grep "^PERF|" build/perf/latest.log | cut -d'|' -f2- \
+			| awk -F'|' '{ printf "%-62s %10s %-10s budget %-7s %s\n", $$1, $$2, $$3, $$4, $$5 }' > build/perf/latest.txt; \
+		echo; cat build/perf/latest.txt; echo; \
+		if [ $$status -eq 0 ]; then echo "perf: all within budget"; else echo "perf: FAILED (full log: build/perf/latest.log)"; fi; \
+		exit $$status
+
+# Real render hitches: records scenarios with Instruments' Animation Hitches template (xctrace,
+# needs Xcode) and checks the hitches it reports. Traces are kept in build/perf/traces/ to open in
+# Instruments. Slow (about 5 minutes), so it's separate from `make perf`.
+perf-trace: build
+	@command -v xcrun >/dev/null && xcrun --find xctrace >/dev/null 2>&1 || { echo "perf-trace needs Xcode (xctrace)"; exit 1; }
+	@mkdir -p build/perf
+	@REFORGE_PERF_TRACE=1 swift test $(TEST_FLAGS) --filter RenderHitchTests $(ARGS) > build/perf/trace.log 2>&1; \
+		status=$$?; \
+		grep -E "✘|error:" build/perf/trace.log; \
+		grep "^PERF|" build/perf/trace.log | cut -d'|' -f2- \
+			| awk -F'|' '{ printf "%-45s %10s %-8s budget %-7s %s\n", $$1, $$2, $$3, $$4, $$5 }' > build/perf/trace.txt; \
+		echo; cat build/perf/trace.txt; echo; \
+		if [ $$status -eq 0 ]; then echo "perf-trace: all within budget (traces in build/perf/traces)"; else echo "perf-trace: FAILED (full log: build/perf/trace.log)"; fi; \
+		exit $$status
 
 # Launches "build/Reforge Dev.app" in stub mode (REFORGE_E2E_FIXTURE, no network/Keychain/real folders) and
 # drives it through the Accessibility API. Grant Accessibility to your terminal or IDE first.
