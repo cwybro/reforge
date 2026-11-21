@@ -177,7 +177,10 @@ struct ContentView: View {
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(model.config.addons) { addon in
-                                AddonRow(addon: addon, model: model)
+                                // Status and latest file go in as values, so a change to one
+                                // addon only re-renders its own row.
+                                AddonRow(addon: addon, status: model.status[addon.id] ?? .unknown,
+                                         latest: model.latest[addon.id], model: model)
                             }
                             if !model.found.isEmpty {
                                 FoundHeader(model: model)
@@ -319,10 +322,11 @@ private struct Header: View {
 
 private struct AddonRow: View {
     let addon: TrackedAddon
+    let status: RowStatus
+    let latest: CFFile?
     let model: Model
     @State private var hovering = false
 
-    private var status: RowStatus { model.status[addon.id] ?? .unknown }
     private var hasUpdate: Bool { status == .updateAvailable }
 
     var body: some View {
@@ -342,7 +346,7 @@ private struct AddonRow: View {
                 .frame(maxWidth: 280, alignment: .trailing)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("addonRow.\(addon.id).version")
-            StatusCell(addon: addon, model: model)
+            StatusCell(addon: addon, status: status, model: model)
                 .frame(width: 104, alignment: .trailing)
         }
         .padding(.horizontal, 16)
@@ -380,7 +384,7 @@ private struct AddonRow: View {
 
     @ViewBuilder private var versions: some View {
         let font = Font.system(size: 12, design: .rounded)
-        if hasUpdate, let latest = model.latest[addon.id] {
+        if hasUpdate, let latest {
             HStack(spacing: 6) {
                 Text(addon.version).foregroundStyle(.white.opacity(0.4)).lineLimit(1).truncationMode(.middle)
                 Image(systemName: "arrow.right").foregroundStyle(Theme.gold.opacity(0.8))
@@ -401,10 +405,11 @@ private struct AddonRow: View {
 
 struct StatusCell: View {
     let addon: TrackedAddon
+    let status: RowStatus
     let model: Model
 
     var body: some View {
-        switch model.status[addon.id] ?? .unknown {
+        switch status {
         case .unknown:
             EmptyView()
         case .upToDate:

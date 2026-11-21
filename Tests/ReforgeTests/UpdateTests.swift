@@ -157,8 +157,11 @@ struct UpdateTests {
         let env = try updatesEnv(withDelta: true)
         let model = env.makeModel()
         await model.checkForUpdates()
+        let saves = env.store.saveCount
         await model.updateAll()
         #expect(env.installer.installs.map(\.fileId) == [250, 450])
+        // One save for the whole run, not one per addon.
+        #expect(env.store.saveCount == saves + 1)
         #expect(model.message == "All updates installed.")
         #expect(env.store.config?.addons.map(\.fileId) == [100, 250, 300, 450])
         #expect(model.updatable.isEmpty)

@@ -255,18 +255,23 @@ final class Model {
         }
     }
 
-    func update(_ addon: TrackedAddon) async {
+    /// Installs the latest file of `addon`. Update All passes `saving: false` and saves once at
+    /// the end, rather than rewriting the whole config after every addon.
+    func update(_ addon: TrackedAddon, saving: Bool = true) async {
         guard let file = latest[addon.id] else { return }
         status[addon.id] = .working
         do {
             let folders = try await installer.install(file, replacing: addon.folders, addonsDir: addonsDir)
             if let i = config.addons.firstIndex(where: { $0.id == addon.id }) {
-                config.addons[i].fileId = file.id
-                config.addons[i].version = file.displayName
-                config.addons[i].fileDate = file.fileDate
-                config.addons[i].folders = folders
+                // One change to the list instead of four, so the rows only re-render once.
+                var updated = config.addons[i]
+                updated.fileId = file.id
+                updated.version = file.displayName
+                updated.fileDate = file.fileDate
+                updated.folders = folders
+                config.addons[i] = updated
             }
-            save()
+            if saving { save() }
             status[addon.id] = .upToDate
             message = "Updated \(addon.name) to \(file.displayName)."
         } catch {
@@ -276,7 +281,8 @@ final class Model {
     }
 
     func updateAll() async {
-        for a in updatable { await update(a) }
+        for a in updatable { await update(a, saving: false) }
+        save()
         let failed = config.addons.filter { if case .failed = status[$0.id] { return true }; return false }
         message = failed.isEmpty ? "All updates installed." : "\(failed.count) update(s) failed."
         PerfProbe.mark("updateAll.done")
